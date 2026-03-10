@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CRM OMD Time Manager
  * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV. Pracownicy mogą edytować swoje oczekujące wpisy.
- * Version: 0.16.0
+ * Version: 0.17.0
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -18,12 +18,17 @@ class CRM_OMD_Time_Manager
     private string $tbl_projects;
     private string $tbl_services;
     private string $tbl_entries;
+    private string $tbl_project_costs;
 
     // Statusy wpisów
     const STATUS_PENDING = 'pending';
     const STATUS_APPROVED = 'approved';
     const STATUS_APPROVED_OFF = 'approved_off';
     const STATUS_REJECTED = 'rejected';
+
+    const PROJECT_STATUS_IN_PROGRESS = 'in_progress';
+    const PROJECT_STATUS_TO_INVOICE = 'to_invoice';
+    const PROJECT_STATUS_SETTLED = 'settled';
 
     public function __construct()
     {
@@ -33,6 +38,7 @@ class CRM_OMD_Time_Manager
         $this->tbl_projects = $wpdb->prefix . 'crm_omd_projects';
         $this->tbl_services = $wpdb->prefix . 'crm_omd_services';
         $this->tbl_entries = $wpdb->prefix . 'crm_omd_entries';
+        $this->tbl_project_costs = $wpdb->prefix . 'crm_omd_project_costs';
 
         register_activation_hook(__FILE__, [$this, 'activate']);
         register_deactivation_hook(__FILE__, [$this, 'deactivate']);
@@ -55,9 +61,12 @@ class CRM_OMD_Time_Manager
         add_action('admin_post_crm_omd_save_reminder_settings', [$this, 'handle_save_reminder_settings']);
         add_action('admin_post_crm_omd_update_worker', [$this, 'handle_update_worker']);
         add_action('admin_post_crm_omd_delete_worker', [$this, 'handle_delete_worker']);
+        add_action('admin_post_crm_omd_add_project_cost_front', [$this, 'handle_add_project_cost_front']);
+        add_action('admin_post_crm_omd_update_project_status_front', [$this, 'handle_update_project_status_front']);
         add_shortcode('crm_omd_time_tracker', [$this, 'render_tracker_shortcode']);
         add_shortcode('crm_omd_employee_login', [$this, 'render_employee_login_shortcode']);
         add_shortcode('crm_omd_employee_monthly_view', [$this, 'render_employee_monthly_view_shortcode']);
+        add_shortcode('crm_omd_employee_projects', [$this, 'render_employee_projects_shortcode']);
         // Zarejestruj akcję dla edycji wpisu
         add_action('admin_post_crm_omd_edit_entry', [$this, 'handle_edit_entry']);
         add_action('admin_post_crm_omd_submit_entry', [$this, 'handle_submit_entry']);
@@ -115,6 +124,36 @@ class CRM_OMD_Time_Manager
         return $statuses;
     }
 
+    private function get_project_status_label(string $status): string
+    {
+        $labels = [
+            self::PROJECT_STATUS_IN_PROGRESS => 'W realizacji',
+            self::PROJECT_STATUS_TO_INVOICE  => 'Do faktury',
+            self::PROJECT_STATUS_SETTLED     => 'Rozliczono',
+        ];
+
+        return $labels[$status] ?? $status;
+    }
+
+    private function get_project_statuses(): array
+    {
+        return [
+            self::PROJECT_STATUS_IN_PROGRESS => $this->get_project_status_label(self::PROJECT_STATUS_IN_PROGRESS),
+            self::PROJECT_STATUS_TO_INVOICE  => $this->get_project_status_label(self::PROJECT_STATUS_TO_INVOICE),
+            self::PROJECT_STATUS_SETTLED     => $this->get_project_status_label(self::PROJECT_STATUS_SETTLED),
+        ];
+    }
+
+    private function user_can_manage_front_projects(int $user_id): bool
+    {
+        $user = get_user_by('id', $user_id);
+        if (!$user) {
+            return false;
+        }
+
+        return in_array('time_tracker_manger', (array) $user->roles, true) || user_can($user, 'manage_options');
+    }
+
     private function get_month_options(string $selected = ''): string {
         $min_date = $this->wpdb->get_var("SELECT MIN(work_date) FROM {$this->tbl_entries}");
         if (!$min_date) {
@@ -140,13 +179,14 @@ class CRM_OMD_Time_Manager
         if (is_a($post, 'WP_Post') && (
             has_shortcode($post->post_content, 'crm_omd_time_tracker') ||
             has_shortcode($post->post_content, 'crm_omd_employee_login') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view')
+            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view') ||
+            has_shortcode($post->post_content, 'crm_omd_employee_projects')
         )) {
             wp_register_style(
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.16.0'
+                '0.17.0'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
@@ -157,13 +197,14 @@ class CRM_OMD_Time_Manager
         global $post;
         if (is_a($post, 'WP_Post') && (
             has_shortcode($post->post_content, 'crm_omd_time_tracker') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view')
+            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view') ||
+            has_shortcode($post->post_content, 'crm_omd_employee_projects')
         )) {
             wp_enqueue_script(
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.16.0',
+                '0.17.0',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -180,7 +221,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.16.0'
+                '0.17.0'
             );
             wp_enqueue_style('crm-omd-admin');
         }
@@ -223,6 +264,18 @@ class CRM_OMD_Time_Manager
             KEY client_id (client_id)
         ) $charset;");
         $this->maybe_add_column($this->tbl_projects, 'budget', "DECIMAL(10,2) NOT NULL DEFAULT 0");
+        $this->maybe_add_column($this->tbl_projects, 'project_status', "VARCHAR(20) NOT NULL DEFAULT 'in_progress'");
+
+        dbDelta("CREATE TABLE {$this->tbl_project_costs} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NOT NULL,
+            description VARCHAR(191) NOT NULL,
+            cost_value DECIMAL(10,2) NOT NULL DEFAULT 0,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY project_id (project_id)
+        ) $charset;");
 
         // Tabela usług
         dbDelta("CREATE TABLE {$this->tbl_services} (
@@ -261,6 +314,16 @@ class CRM_OMD_Time_Manager
             KEY status (status),
             KEY work_date (work_date)
         ) $charset;");
+
+        $employee_role = get_role('time_tracker_employee');
+        if (!$employee_role) {
+            $employee_role = get_role('subscriber');
+        }
+        $caps = ['read' => true];
+        if ($employee_role) {
+            $caps = $employee_role->capabilities;
+        }
+        add_role('time_tracker_manger', 'Time Tracker Manager', $caps);
 
         if (!wp_next_scheduled('crm_omd_daily_reminder')) {
             wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', 'crm_omd_daily_reminder');
@@ -539,7 +602,6 @@ class CRM_OMD_Time_Manager
             return '<p class="crm-omd-frontend">Twoje konto jest wyłączone z raportowania czasu pracy.</p>';
         }
 
-        // Obsługa parametru edit_entry
         if (isset($_GET['edit_entry']) && is_numeric($_GET['edit_entry'])) {
             $entry_id = (int) $_GET['edit_entry'];
             $entry = $this->wpdb->get_row($this->wpdb->prepare(
@@ -549,12 +611,10 @@ class CRM_OMD_Time_Manager
             ));
             if ($entry) {
                 return $this->render_edit_entry_form($entry);
-            } else {
-                return '<p class="crm-omd-frontend error">Nie znaleziono wpisu do edycji lub nie masz uprawnień.</p>';
             }
+            return '<p class="crm-omd-frontend error">Nie znaleziono wpisu do edycji lub nie masz uprawnień.</p>';
         }
 
-        // Wyświetl komunikat sukcesu po edycji
         if (isset($_GET['updated']) && $_GET['updated'] == '1') {
             echo '<div class="crm-omd-frontend success" style="background-color: #d4edda; color: #155724; padding: 10px; margin-bottom: 15px; border: 1px solid #c3e6cb; border-radius: 4px;">Wpis został zaktualizowany.</div>';
         }
@@ -569,14 +629,28 @@ class CRM_OMD_Time_Manager
         $month_num = (int) substr($month, 5, 2);
         [$date_from, $date_to] = $this->get_month_boundaries($month);
 
-
         $user_id = get_current_user_id();
         $reported_hours = $this->get_user_reported_hours_for_range($user_id, $date_from, $date_to);
         $working_days = $this->get_working_days_in_month($year, $month_num);
         $expected_hours = $working_days * 8;
 
+        $active_tab = isset($_GET['crm_omd_tab']) ? sanitize_key((string) $_GET['crm_omd_tab']) : 'timesheet';
+        if (!in_array($active_tab, ['timesheet', 'projects'], true)) {
+            $active_tab = 'timesheet';
+        }
+
         ob_start();
         echo '<div class="crm-omd-frontend crm-omd-employee-monthly-view">';
+        echo '<div class="crm-omd-tabs">';
+        echo '<a class="crm-omd-tab ' . ($active_tab === 'timesheet' ? 'is-active' : '') . '" href="' . esc_url(add_query_arg('crm_omd_tab', 'timesheet')) . '">Ewidencja czasu</a>';
+        echo '<a class="crm-omd-tab ' . ($active_tab === 'projects' ? 'is-active' : '') . '" href="' . esc_url(add_query_arg('crm_omd_tab', 'projects')) . '">Projekty</a>';
+        echo '</div>';
+
+        if ($active_tab === 'projects') {
+            echo $this->render_employee_projects_shortcode();
+            echo '</div>';
+            return (string) ob_get_clean();
+        }
 
         echo '<form method="get" style="margin:1em 0;width: 35%;float: left;margin-right: 5%;">';
         foreach ($_GET as $key => $value) {
@@ -611,6 +685,94 @@ class CRM_OMD_Time_Manager
         echo '</div>';
 
         echo '</div>';
+        return (string) ob_get_clean();
+    }
+
+    public function render_employee_projects_shortcode($atts = [], $content = null, string $shortcode_tag = ''): string
+    {
+        if (!is_user_logged_in()) {
+            return '<p>Musisz być zalogowany.</p>';
+        }
+
+        $user_id = get_current_user_id();
+        $can_manage = $this->user_can_manage_front_projects($user_id);
+
+        $projects = $this->wpdb->get_results(
+            "SELECT p.id, p.name, p.budget, p.project_status, c.name AS client_name,
+                    COALESCE(SUM(e.hours), 0) AS reported_hours
+             FROM {$this->tbl_projects} p
+             INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
+             LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id
+             WHERE p.is_active = 1
+             GROUP BY p.id, p.name, p.budget, p.project_status, c.name
+             ORDER BY c.name ASC, p.name ASC"
+        );
+
+        $costs_raw = $this->wpdb->get_results("SELECT project_id, COALESCE(SUM(cost_value), 0) AS total_cost FROM {$this->tbl_project_costs} GROUP BY project_id");
+        $costs = [];
+        foreach ($costs_raw as $cost_row) {
+            $costs[(int) $cost_row->project_id] = (float) $cost_row->total_cost;
+        }
+
+        $statuses = $this->get_project_statuses();
+
+        ob_start();
+        echo '<h3>Projekty</h3>';
+
+        if (isset($_GET['project_updated']) && $_GET['project_updated'] === '1') {
+            echo '<p class="crm-omd-project-alert">Projekt został zaktualizowany.</p>';
+        }
+
+        echo '<table class="entries-table">';
+        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Status</th><th>Budżet</th><th>Zaraportowane godziny</th><th>Koszty projektu</th><th>Wynik</th></tr></thead><tbody>';
+        if (empty($projects)) {
+            echo '<tr><td colspan="7">Brak projektów.</td></tr>';
+        } else {
+            foreach ($projects as $project) {
+                $project_id = (int) $project->id;
+                $project_cost = $costs[$project_id] ?? 0.0;
+                $result = (float) $project->budget - (float) $project->reported_hours - $project_cost;
+
+                echo '<tr>';
+                echo '<td>' . esc_html($project->client_name) . '</td>';
+                echo '<td>' . esc_html($project->name) . '</td>';
+                echo '<td>' . esc_html($this->get_project_status_label((string) $project->project_status)) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $project->budget, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $project->reported_hours, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $project_cost, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $result, 2, ',', ' ')) . '</td>';
+                echo '</tr>';
+
+                if ($can_manage) {
+                    echo '<tr><td colspan="7">';
+                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions">';
+                    wp_nonce_field('crm_omd_update_project_status_' . $project_id);
+                    echo '<input type="hidden" name="action" value="crm_omd_update_project_status_front">';
+                    echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
+                    echo '<label>Status projektu</label>';
+                    echo '<select name="project_status">';
+                    foreach ($statuses as $status_key => $status_label) {
+                        echo '<option value="' . esc_attr($status_key) . '" ' . selected((string) $project->project_status, $status_key, false) . '>' . esc_html($status_label) . '</option>';
+                    }
+                    echo '</select>';
+                    echo '<button type="submit">Zmień status</button>';
+                    echo '</form>';
+
+                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions">';
+                    wp_nonce_field('crm_omd_add_project_cost_' . $project_id);
+                    echo '<input type="hidden" name="action" value="crm_omd_add_project_cost_front">';
+                    echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
+                    echo '<label>Dodaj koszt (ryczałt)</label>';
+                    echo '<input type="text" name="cost_description" maxlength="191" placeholder="Opis kosztu" required>';
+                    echo '<input type="number" name="cost_value" step="0.01" min="0" placeholder="Wartość kosztu" required>';
+                    echo '<button type="submit">Dodaj koszt</button>';
+                    echo '</form>';
+                    echo '</td></tr>';
+                }
+            }
+        }
+        echo '</tbody></table>';
+
         return (string) ob_get_clean();
     }
 
@@ -991,6 +1153,79 @@ class CRM_OMD_Time_Manager
         );
 
         wp_redirect(home_url('/panel-pracownika/'));
+        exit;
+    }
+
+
+    public function handle_update_project_status_front(): void
+    {
+        if (!is_user_logged_in()) {
+            wp_die(esc_html__('Musisz być zalogowany.', 'crm-omd-time-manager'));
+        }
+
+        $user_id = get_current_user_id();
+        if (!$this->user_can_manage_front_projects($user_id)) {
+            wp_die(esc_html__('Brak uprawnień do edycji projektu.', 'crm-omd-time-manager'));
+        }
+
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $status = isset($_POST['project_status']) ? sanitize_text_field(wp_unslash($_POST['project_status'])) : '';
+        if ($project_id <= 0) {
+            wp_die(esc_html__('Nieprawidłowy projekt.', 'crm-omd-time-manager'));
+        }
+
+        check_admin_referer('crm_omd_update_project_status_' . $project_id);
+
+        if (!array_key_exists($status, $this->get_project_statuses())) {
+            wp_die(esc_html__('Nieprawidłowy status projektu.', 'crm-omd-time-manager'));
+        }
+
+        $this->wpdb->update(
+            $this->tbl_projects,
+            ['project_status' => $status],
+            ['id' => $project_id],
+            ['%s'],
+            ['%d']
+        );
+
+        wp_safe_redirect(add_query_arg(['crm_omd_tab' => 'projects', 'project_updated' => '1'], home_url('/panel-pracownika/')));
+        exit;
+    }
+
+    public function handle_add_project_cost_front(): void
+    {
+        if (!is_user_logged_in()) {
+            wp_die(esc_html__('Musisz być zalogowany.', 'crm-omd-time-manager'));
+        }
+
+        $user_id = get_current_user_id();
+        if (!$this->user_can_manage_front_projects($user_id)) {
+            wp_die(esc_html__('Brak uprawnień do dodawania kosztów projektu.', 'crm-omd-time-manager'));
+        }
+
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $description = isset($_POST['cost_description']) ? sanitize_text_field(wp_unslash($_POST['cost_description'])) : '';
+        $cost_value = isset($_POST['cost_value']) ? (float) $_POST['cost_value'] : 0;
+
+        if ($project_id <= 0 || $description === '' || $cost_value < 0) {
+            wp_die(esc_html__('Wypełnij poprawnie dane kosztu.', 'crm-omd-time-manager'));
+        }
+
+        check_admin_referer('crm_omd_add_project_cost_' . $project_id);
+
+        $this->wpdb->insert(
+            $this->tbl_project_costs,
+            [
+                'project_id' => $project_id,
+                'description' => $description,
+                'cost_value' => $cost_value,
+                'created_by' => $user_id,
+                'created_at' => current_time('mysql'),
+            ],
+            ['%d', '%s', '%f', '%d', '%s']
+        );
+
+        wp_safe_redirect(add_query_arg(['crm_omd_tab' => 'projects', 'project_updated' => '1'], home_url('/panel-pracownika/')));
         exit;
     }
 
@@ -1863,7 +2098,6 @@ class CRM_OMD_Time_Manager
         $postcode = isset($_POST['postcode']) ? sanitize_text_field(wp_unslash($_POST['postcode'])) : '';
         $city = isset($_POST['city']) ? sanitize_text_field(wp_unslash($_POST['city'])) : '';
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-
         if ($name === '') {
             wp_die(esc_html__('Nazwa jest wymagana.', 'crm-omd-time-manager'));
         }
@@ -1930,7 +2164,7 @@ class CRM_OMD_Time_Manager
         $projects_by_client = [];
         foreach ($clients as $client) {
             $projects = $this->wpdb->get_results($this->wpdb->prepare(
-                "SELECT id, name, is_active, budget FROM {$this->tbl_projects} WHERE client_id = %d ORDER BY name ASC",
+                "SELECT id, name, is_active, budget, project_status FROM {$this->tbl_projects} WHERE client_id = %d ORDER BY name ASC",
                 $client->id
             ));
             if (!empty($projects)) {
@@ -1977,6 +2211,14 @@ class CRM_OMD_Time_Manager
                     <label for="budget">Budżet projektu (PLN)</label>
                     <input type="number" name="budget" id="budget" step="0.01" min="0" value="<?php echo $edit ? esc_attr((string) $edit->budget) : ''; ?>">
                 </div>
+                <div class="form-field">
+                    <label for="project_status">Status projektu</label>
+                    <select name="project_status" id="project_status">
+                        <?php foreach ($this->get_project_statuses() as $status_key => $status_label): ?>
+                            <option value="<?php echo esc_attr($status_key); ?>" <?php selected($edit ? (string) $edit->project_status : self::PROJECT_STATUS_IN_PROGRESS, $status_key); ?>><?php echo esc_html($status_label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div class="form-field" style="display: flex; align-items: center;background: #d0a46c;border-color: #b58b54;color: #212123;padding: 12px 10px 10px 10px;margin-top: 24px">
                     <label style="margin-right: 10px;">
                         <input type="checkbox" name="is_active" value="1" <?php checked($edit ? (int) $edit->is_active : 1, 1); ?>>
@@ -1999,14 +2241,22 @@ class CRM_OMD_Time_Manager
         echo '<div class="crm-omd-admin-card">';
         echo '<h2>Lista projektów</h2>';
         echo '<table class="widefat striped crm-omd-table">';
-        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Budżet</th><th>Status</th><th>Akcje</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Status projektu</th><th>Budżet</th><th>Zaraportowane godziny</th><th>Koszty projektu</th><th>Wynik</th><th>Status</th><th>Akcje</th></tr></thead><tbody>';
         foreach ($projects_by_client as $group) {
-            echo '<tr class="client-group-header"><td colspan="5"><strong>' . esc_html($group['client_name']) . '</strong></td></tr>';
+            echo '<tr class="client-group-header"><td colspan="9"><strong>' . esc_html($group['client_name']) . '</strong></td></tr>';
             foreach ($group['projects'] as $project) {
+                $reported_hours = (float) $this->wpdb->get_var($this->wpdb->prepare("SELECT COALESCE(SUM(hours), 0) FROM {$this->tbl_entries} WHERE project_id = %d", (int) $project->id));
+                $project_costs = (float) $this->wpdb->get_var($this->wpdb->prepare("SELECT COALESCE(SUM(cost_value), 0) FROM {$this->tbl_project_costs} WHERE project_id = %d", (int) $project->id));
+                $project_result = (float) $project->budget - $reported_hours - $project_costs;
+
                 echo '<tr>';
                 echo '<td>' . esc_html($group['client_name']) . '</td>';
                 echo '<td>' . esc_html($project->name) . '</td>';
+                echo '<td>' . esc_html($this->get_project_status_label((string) $project->project_status)) . '</td>';
                 echo '<td>' . esc_html(number_format((float) $project->budget, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format($reported_hours, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format($project_costs, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format($project_result, 2, ',', ' ')) . '</td>';
                 echo '<td>' . ((int) $project->is_active ? 'Aktywny' : 'Nieaktywny') . '</td>';
                 echo '<td>';
                 echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'crm-omd-projects', 'edit_project' => (int) $project->id], admin_url('admin.php'))) . '">Edytuj</a> ';
@@ -2030,7 +2280,10 @@ class CRM_OMD_Time_Manager
         $name = isset($_POST['name']) ? sanitize_text_field(wp_unslash($_POST['name'])) : '';
         $budget = isset($_POST['budget']) ? (float) $_POST['budget'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-
+        $project_status = isset($_POST['project_status']) ? sanitize_text_field(wp_unslash($_POST['project_status'])) : self::PROJECT_STATUS_IN_PROGRESS;
+        if (!array_key_exists($project_status, $this->get_project_statuses())) {
+            $project_status = self::PROJECT_STATUS_IN_PROGRESS;
+        }
         if (!$client_id || $name === '') {
             wp_die(esc_html__('Wypełnij wymagane pola.', 'crm-omd-time-manager'));
         }
@@ -2042,10 +2295,11 @@ class CRM_OMD_Time_Manager
                     'client_id' => $client_id,
                     'name'      => $name,
                     'budget'    => $budget,
-                    'is_active' => $is_active
+                    'is_active' => $is_active,
+                    'project_status' => $project_status
                 ],
                 ['id' => $id],
-                ['%d', '%s', '%f', '%d'],
+                ['%d', '%s', '%f', '%d', '%s'],
                 ['%d']
             );
         } else {
@@ -2057,9 +2311,10 @@ class CRM_OMD_Time_Manager
                     'budget'      => $budget,
                     'description' => '',
                     'is_active'   => 1,
+                    'project_status' => $project_status,
                     'created_at'  => current_time('mysql')
                 ],
-                ['%d', '%s', '%f', '%s', '%d', '%s']
+                ['%d', '%s', '%f', '%s', '%d', '%s', '%s']
             );
         }
 
@@ -2205,7 +2460,6 @@ class CRM_OMD_Time_Manager
         $hourly_rate = isset($_POST['hourly_rate']) ? (float) $_POST['hourly_rate'] : 0;
         $fixed_value = isset($_POST['fixed_value']) ? (float) $_POST['fixed_value'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-
         if (!$client_id || $name === '' || !in_array($billing_type, ['hourly', 'fixed'], true)) {
             wp_die(esc_html__('Wypełnij poprawnie formularz.', 'crm-omd-time-manager'));
         }
@@ -2943,7 +3197,7 @@ class CRM_OMD_Time_Manager
             }
         }
 
-        $users = get_users(['role__in' => ['subscriber', 'author', 'editor', 'administrator']]);
+        $users = get_users(['role__in' => ['subscriber', 'author', 'editor', 'administrator', 'time_tracker_manger']]);
 
         foreach ($users as $user) {
             $enabled = get_user_meta($user->ID, 'crm_omd_worker_enabled', true);

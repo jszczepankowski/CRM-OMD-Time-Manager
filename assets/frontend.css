@@ -405,3 +405,8 @@ textarea::placeholder {
         align-items: stretch;
     }
 }
+.crm-omd-tabs { display:flex; gap:10px; margin-bottom:16px; }
+.crm-omd-tab { padding:8px 14px; border:1px solid #ddb178; border-radius:6px; text-decoration:none; color:#212123; background:#fff; }
+.crm-omd-tab.is-active { background:#ddb178; font-weight:600; }
+.crm-omd-project-actions { display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; align-items:end; margin:10px 0; }
+.crm-omd-project-alert { background:#d4edda; color:#155724; border:1px solid #c3e6cb; padding:8px 10px; border-radius:4px; }
