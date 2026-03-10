@@ -4,6 +4,7 @@
     $(document).ready(function() {
         initDependentSelects();
         initAjaxFormSubmit();
+        initProjectCostModal();
     });
 
     function initDependentSelects() {
@@ -112,6 +113,32 @@
             }).fail(function() {
                 alert('Wystąpił błąd połączenia.');
             });
+        });
+    }
+
+
+    function initProjectCostModal() {
+        var $modals = $('.crm-omd-modal');
+        if (!$modals.length) return;
+
+        $(document).on('click', '.crm-omd-open-cost-modal', function() {
+            var modalId = $(this).data('modal-target');
+            if (!modalId) return;
+
+            var $modal = $('#' + modalId);
+            if (!$modal.length) return;
+
+            $modal.addClass('is-open').attr('aria-hidden', 'false');
+        });
+
+        $(document).on('click', '[data-close-modal="1"]', function() {
+            $(this).closest('.crm-omd-modal').removeClass('is-open').attr('aria-hidden', 'true');
+        });
+
+        $(document).on('keydown', function(e) {
+            if (e.key === 'Escape') {
+                $('.crm-omd-modal.is-open').removeClass('is-open').attr('aria-hidden', 'true');
+            }
         });
     }
 

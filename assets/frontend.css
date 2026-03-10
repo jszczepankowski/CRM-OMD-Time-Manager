@@ -458,3 +458,51 @@ textarea::placeholder {
         align-items: stretch;
     }
 }
+
+.crm-omd-open-cost-modal {
+    min-width: auto !important;
+    width: auto;
+}
+
+.crm-omd-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+}
+
+.crm-omd-modal.is-open {
+    display: block;
+}
+
+.crm-omd-modal__overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.crm-omd-modal__content {
+    position: relative;
+    background: #fff;
+    margin: 8vh auto;
+    width: min(520px, calc(100% - 2rem));
+    border-radius: 10px;
+    padding: 1.25rem;
+    z-index: 1;
+}
+
+.crm-omd-modal__close {
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+    min-width: auto !important;
+    width: auto;
+    font-size: 1.3rem;
+    line-height: 1;
+    padding: 0.25rem 0.5rem;
+    background: transparent !important;
+}
+
+.crm-omd-project-actions--modal {
+    grid-template-columns: 1fr;
+}
