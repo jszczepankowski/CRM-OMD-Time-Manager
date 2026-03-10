@@ -325,6 +325,38 @@ class CRM_OMD_Time_Manager
         }
     }
 
+    private function ensure_project_workers_table_exists(): void
+    {
+        static $checked = false;
+        if ($checked) {
+            return;
+        }
+
+        $checked = true;
+
+        $table_exists = $this->wpdb->get_var($this->wpdb->prepare(
+            "SHOW TABLES LIKE %s",
+            $this->tbl_project_workers
+        ));
+
+        if ($table_exists === $this->tbl_project_workers) {
+            return;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        $charset = $this->wpdb->get_charset_collate();
+        dbDelta("CREATE TABLE {$this->tbl_project_workers} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY project_user (project_id, user_id),
+            KEY project_id (project_id),
+            KEY user_id (user_id)
+        ) $charset;");
+    }
+
     public function activate(): void
     {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -2476,6 +2508,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
     public function handle_save_project(): void
     {
+        $this->ensure_project_workers_table_exists();
         $this->require_admin_access();
         check_admin_referer('crm_omd_save_project');
 
@@ -2549,6 +2582,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
     public function handle_delete_project(): void
     {
+        $this->ensure_project_workers_table_exists();
         $this->require_admin_access();
         $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
         check_admin_referer('crm_omd_delete_project_' . $id);
