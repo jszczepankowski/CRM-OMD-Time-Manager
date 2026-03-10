@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CRM OMD Time Manager
  * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV. Pracownicy mogą edytować swoje oczekujące wpisy.
- * Version: 0.17.0
+ * Version: 0.17.1
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -197,6 +197,26 @@ class CRM_OMD_Time_Manager
         return array_values(array_unique(array_map('intval', $worker_ids)));
     }
 
+    /**
+     * @return array<int, object{id:int,project_id:int,description:string,cost_value:float,created_by:int|null,created_at:string|null}>
+     */
+    private function get_project_cost_rows(int $project_id): array
+    {
+        if ($project_id <= 0) {
+            return [];
+        }
+
+        $query = $this->wpdb->prepare(
+            "SELECT id, project_id, description, cost_value, created_by, created_at
+             FROM {$this->tbl_project_costs}
+             WHERE project_id = %d
+             ORDER BY created_at DESC, id DESC",
+            $project_id
+        );
+
+        return (array) $this->wpdb->get_results($query);
+    }
+
     private function user_can_manage_project(int $user_id, int $project_id): bool
     {
         if ($project_id <= 0 || !$this->user_can_manage_front_projects($user_id)) {
@@ -288,7 +308,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.17.0'
+                '0.17.1'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
@@ -306,7 +326,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.17.0',
+                '0.17.1',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -323,7 +343,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.17.0'
+                '0.17.1'
             );
             wp_enqueue_style('crm-omd-admin');
         }
@@ -970,6 +990,8 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                     echo '</select>';
                     echo '<button type="submit">Zapisz status</button>';
                     echo '</form>';
+                    echo '</div>';
+                    echo '</div>';
 
                     echo '<button type="button" class="crm-omd-open-cost-modal" data-modal-target="crm-omd-cost-modal-' . $project_id . '">Dodaj koszt</button>';
                     echo '<div id="crm-omd-cost-modal-' . $project_id . '" class="crm-omd-modal" aria-hidden="true">';
@@ -2520,6 +2542,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         $edit_id = isset($_GET['edit_project']) ? (int) $_GET['edit_project'] : 0;
         $edit = $edit_id ? $this->wpdb->get_row($this->wpdb->prepare("SELECT * FROM {$this->tbl_projects} WHERE id = %d", $edit_id)) : null;
         $project_worker_ids = $edit ? $this->get_project_worker_ids((int) $edit->id) : [];
+        $edit_project_cost_rows = $edit ? $this->get_project_cost_rows((int) $edit->id) : [];
         $assignable_workers = get_users([
             'role__in' => [self::ROLE_EMPLOYEE, self::ROLE_MANAGER, self::ROLE_LEGACY_EMPLOYEE, self::ROLE_LEGACY_MANAGER],
             'orderby'  => 'display_name',
@@ -2567,9 +2590,9 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="form-field">
+                <div class="form-field crm-omd-full-width-field">
                     <label for="assigned_workers">Przypisani pracownicy</label>
-                    <select name="assigned_workers[]" id="assigned_workers" multiple size="8">
+                    <select name="assigned_workers[]" id="assigned_workers" class="crm-omd-assigned-workers" multiple size="8">
                         <?php foreach ($assignable_workers as $worker): ?>
                             <option value="<?php echo (int) $worker->ID; ?>" <?php selected(in_array((int) $worker->ID, $project_worker_ids, true), true); ?>>
                                 <?php echo esc_html($worker->display_name . ' (' . $worker->user_email . ')'); ?>
@@ -2593,6 +2616,44 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                 <?php endif; ?>
             </p>
         </form>
+
+        <?php if ($edit): ?>
+            <h3>Koszty edytowanego projektu</h3>
+            <?php if (empty($edit_project_cost_rows)): ?>
+                <p>Brak kosztów dla projektu.</p>
+            <?php else: ?>
+                <table class="widefat striped crm-omd-table">
+                    <thead><tr><th>Dane kosztu</th><th>Akcje</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($edit_project_cost_rows as $cost_row): ?>
+                        <?php $cost_id = (int) $cost_row->id; ?>
+                        <tr>
+                            <td>
+                                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:flex;gap:8px;align-items:center;">
+                                    <?php wp_nonce_field('crm_omd_update_project_cost_admin_' . $cost_id); ?>
+                                    <input type="hidden" name="action" value="crm_omd_update_project_cost_admin">
+                                    <input type="hidden" name="project_id" value="<?php echo (int) $edit->id; ?>">
+                                    <input type="hidden" name="cost_id" value="<?php echo $cost_id; ?>">
+                                    <input type="text" name="cost_description" value="<?php echo esc_attr((string) $cost_row->description); ?>" maxlength="191" required style="min-width:260px;">
+                                    <input type="number" name="cost_value" step="0.01" min="0" value="<?php echo esc_attr(number_format((float) $cost_row->cost_value, 2, '.', '')); ?>" required>
+                                    <button type="submit" class="button">Zapisz</button>
+                                </form>
+                            </td>
+                            <td>
+                                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="display:inline-block;" onsubmit="return confirm('Usunąć koszt projektu?');">
+                                    <?php wp_nonce_field('crm_omd_delete_project_cost_admin_' . $cost_id); ?>
+                                    <input type="hidden" name="action" value="crm_omd_delete_project_cost_admin">
+                                    <input type="hidden" name="project_id" value="<?php echo (int) $edit->id; ?>">
+                                    <input type="hidden" name="cost_id" value="<?php echo $cost_id; ?>">
+                                    <button type="submit" class="button">Usuń</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        <?php endif; ?>
         <?php
         echo '</div>';
 
