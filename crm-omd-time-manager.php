@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CRM OMD Time Manager
  * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV. Pracownicy mogą edytować swoje oczekujące wpisy.
- * Version: 0.15.3
+ * Version: 0.16.0
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -48,6 +48,7 @@ class CRM_OMD_Time_Manager
         add_action('admin_post_crm_omd_review_entry', [$this, 'handle_review_entry']);
         add_action('admin_post_crm_omd_save_entry_admin', [$this, 'handle_save_entry_admin']);
         add_action('admin_post_crm_omd_delete_entry', [$this, 'handle_delete_entry']);
+        add_action('admin_post_crm_omd_bulk_entries_update', [$this, 'handle_bulk_entries_update']);
         add_action('admin_post_crm_omd_duplicate_fixed_entry', [$this, 'handle_duplicate_fixed_entry']);
         add_action('admin_post_crm_omd_export_report', [$this, 'handle_export_report']);
         add_action('admin_post_crm_omd_save_worker_settings', [$this, 'handle_save_worker_settings']);
@@ -145,7 +146,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.15.3'
+                '0.16.0'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
@@ -162,7 +163,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.15.3',
+                '0.16.0',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -179,7 +180,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.15.3'
+                '0.16.0'
             );
             wp_enqueue_style('crm-omd-admin');
         }
@@ -1273,13 +1274,28 @@ class CRM_OMD_Time_Manager
         echo '</form>';
         echo '</div>';
 
-        // Tabela wpisów
+        // Tabela wpisów + akcje masowe
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        wp_nonce_field('crm_omd_bulk_entries_update');
+        echo '<input type="hidden" name="action" value="crm_omd_bulk_entries_update">';
+        echo '<input type="hidden" name="return_url" value="' . esc_attr(wp_unslash($_SERVER['REQUEST_URI'] ?? admin_url('admin.php?page=crm-omd-time'))) . '">';
+        echo '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">';
+        echo '<select name="bulk_action">';
+        echo '<option value="">Akcje masowe</option>';
+        echo '<option value="delete">Usuń zaznaczone</option>';
+        foreach ($statuses as $value => $label) {
+            echo '<option value="status:' . esc_attr($value) . '">Ustaw status: ' . esc_html($label) . '</option>';
+        }
+        echo '</select>';
+        echo '<button type="submit" class="button">Wykonaj</button>';
+        echo '</div>';
         echo '<table class="widefat striped crm-omd-table">';
         echo '<thead><tr>';
-        echo '<th>ID</th><th>Data</th><th>Pracownik</th><th>Klient</th><th>Projekt</th><th>Usługa</th><th>Godziny</th><th>Wartość</th><th>Status</th><th>Opis</th><th>Akcje</th>';
+        echo '<th><input type="checkbox" id="crm-omd-select-all" aria-label="Zaznacz wszystkie"></th><th>ID</th><th>Data</th><th>Pracownik</th><th>Klient</th><th>Projekt</th><th>Usługa</th><th>Godziny</th><th>Wartość</th><th>Status</th><th>Opis</th><th>Akcje</th>';
         echo '</tr></thead><tbody>';
         foreach ($rows as $row) {
             echo '<tr>';
+            echo '<td><input type="checkbox" name="entry_ids[]" value="' . (int) $row->id . '"></td>';
             echo '<td>' . (int) $row->id . '</td>';
             echo '<td>' . esc_html($row->work_date) . '</td>';
             echo '<td>' . esc_html($row->display_name) . '</td>';
@@ -1304,6 +1320,7 @@ class CRM_OMD_Time_Manager
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</form>';
         echo '</div>';
 
         // Skrypt AJAX dla formularzy admina
@@ -1355,6 +1372,10 @@ class CRM_OMD_Time_Manager
                     }
                 }).fail(function() { console.error('Błąd ładowania usług'); });
             }
+
+            $('#crm-omd-select-all').on('change', function() {
+                $('input[name="entry_ids[]"]').prop('checked', $(this).is(':checked'));
+            });
 
             $client.on('change', function() {
                 var clientId = $(this).val();
@@ -1621,6 +1642,64 @@ class CRM_OMD_Time_Manager
         $this->wpdb->delete($this->tbl_entries, ['id' => $id], ['%d']);
 
         wp_safe_redirect(admin_url('admin.php?page=crm-omd-time'));
+        exit;
+    }
+
+    public function handle_bulk_entries_update(): void
+    {
+        $this->require_admin_access();
+        check_admin_referer('crm_omd_bulk_entries_update');
+
+        $bulk_action = isset($_POST['bulk_action']) ? sanitize_text_field(wp_unslash($_POST['bulk_action'])) : '';
+        $entry_ids = isset($_POST['entry_ids']) && is_array($_POST['entry_ids']) ? array_map('intval', wp_unslash($_POST['entry_ids'])) : [];
+        $entry_ids = array_values(array_filter($entry_ids, static function ($id) {
+            return $id > 0;
+        }));
+
+        $return_url_raw = isset($_POST['return_url']) ? sanitize_text_field(wp_unslash($_POST['return_url'])) : '';
+        $return_url = admin_url('admin.php?page=crm-omd-time');
+        if ($return_url_raw !== '') {
+            $return_url = wp_validate_redirect($return_url_raw, $return_url);
+        }
+
+        if ($bulk_action === '' || empty($entry_ids)) {
+            wp_safe_redirect($return_url);
+            exit;
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($entry_ids), '%d'));
+
+        if ($bulk_action === 'delete') {
+            $sql = "DELETE FROM {$this->tbl_entries} WHERE id IN ({$placeholders})";
+            $this->wpdb->query($this->wpdb->prepare($sql, ...$entry_ids));
+            wp_safe_redirect($return_url);
+            exit;
+        }
+
+        if (strpos($bulk_action, 'status:') === 0) {
+            $new_status = substr($bulk_action, 7);
+            $allowed_statuses = array_keys($this->get_available_statuses(true));
+            if (in_array($new_status, $allowed_statuses, true)) {
+                if ($new_status === self::STATUS_PENDING) {
+                    $sql = "UPDATE {$this->tbl_entries}
+                            SET status = %s,
+                                reviewed_by = NULL,
+                                reviewed_at = NULL
+                            WHERE id IN ({$placeholders})";
+                    $params = array_merge([$new_status], $entry_ids);
+                } else {
+                    $sql = "UPDATE {$this->tbl_entries}
+                            SET status = %s,
+                                reviewed_by = %d,
+                                reviewed_at = %s
+                            WHERE id IN ({$placeholders})";
+                    $params = array_merge([$new_status, get_current_user_id(), current_time('mysql')], $entry_ids);
+                }
+                $this->wpdb->query($this->wpdb->prepare($sql, ...$params));
+            }
+        }
+
+        wp_safe_redirect($return_url);
         exit;
     }
 
@@ -2255,10 +2334,12 @@ class CRM_OMD_Time_Manager
 
         $summary = $this->wpdb->get_results($this->wpdb->prepare("
             SELECT user_id,
-                   SUM(hours) AS total_hours,
-                   SUM(calculated_value) AS total_revenue
+                   SUM(CASE WHEN status = 'approved' THEN hours ELSE 0 END) AS total_hours,
+                   SUM(CASE WHEN status = 'approved_off' THEN hours ELSE 0 END) AS total_off_hours,
+                   SUM(CASE WHEN status = 'approved' THEN calculated_value ELSE 0 END) AS total_revenue
             FROM {$this->tbl_entries}
-            WHERE work_date BETWEEN %s AND %s AND status = 'approved'
+            WHERE work_date BETWEEN %s AND %s
+              AND status IN ('approved', 'approved_off')
             GROUP BY user_id
         ", $admin_date_from, $admin_date_to), OBJECT_K);
 
@@ -2356,6 +2437,7 @@ class CRM_OMD_Time_Manager
                 <tr>
                     <th>Pracownik</th>
                     <th>Zaraportowane godziny</th>
+                    <th>Zaakceptowane OFF</th>
                     <th>Godziny do przepracowania</th>
                     <th>Różnica godzin</th>
                     <th>Wypracowany zysk (PLN)</th>
@@ -2367,17 +2449,20 @@ class CRM_OMD_Time_Manager
             <tbody>
                 <?php foreach ($users as $user):
                     $reported = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_hours : 0;
+                    $approved_off = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_off_hours : 0;
                     $revenue  = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_revenue : 0;
                     $salary = (float) get_user_meta($user->ID, 'crm_omd_worker_monthly_salary', true);
                     $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
                     $cost = $reported * $hourly_rate; // uproszczenie – tylko godziny
                     $profit_net = $revenue - $cost;
+                    $hours_to_work = (float) $admin_expected_hours;
                 ?>
                 <tr>
                     <td><?php echo esc_html($user->display_name); ?></td>
                     <td><?php echo esc_html(number_format($reported, 2, ',', ' ')); ?></td>
-                    <td><?php echo esc_html((string) $admin_expected_hours); ?></td>
-                    <td><?php echo esc_html(number_format($reported - $admin_expected_hours, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($approved_off, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($hours_to_work, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($reported - $hours_to_work, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($revenue, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($salary, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($cost, 2, ',', ' ')); ?></td>
@@ -2750,15 +2835,56 @@ class CRM_OMD_Time_Manager
         }
 
         if ($detail) {
-            $sql = "SELECT e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
+            $sql = "SELECT e.user_id, e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
                     FROM {$this->tbl_entries} e
                     INNER JOIN {$this->tbl_clients} c ON c.id = e.client_id
                     INNER JOIN {$this->tbl_projects} p ON p.id = e.project_id
                     INNER JOIN {$this->tbl_services} s ON s.id = e.service_id
                     INNER JOIN {$this->wpdb->users} u ON u.ID = e.user_id
                     {$where}
-                    ORDER BY e.work_date ASC, e.id ASC";
-            $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$params), ARRAY_A);
+                    ORDER BY c.name ASC, e.work_date ASC, e.id ASC";
+            $detail_rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$params), ARRAY_A);
+
+            $user_ids = [];
+            foreach ($detail_rows as $row) {
+                $user_ids[(int) $row['user_id']] = true;
+            }
+            $hourly_rates = [];
+            foreach (array_keys($user_ids) as $uid) {
+                $hourly_rates[$uid] = (float) get_user_meta((int) $uid, 'crm_omd_worker_hourly_rate', true);
+            }
+
+            $rows = [];
+            $current_client = null;
+            foreach ($detail_rows as $row) {
+                $client_name = (string) $row['client_name'];
+                if ($current_client !== $client_name) {
+                    if ($current_client !== null) {
+                        $rows[] = ['', '', '', '', '', '', '', '', '', ''];
+                    }
+                    $rows[] = ['Klient', $client_name, '', '', '', '', '', '', '', ''];
+                    $rows[] = ['Data', 'Klient', 'Projekt', 'Usługa', 'Pracownik', 'Godziny', 'Przychód', 'Koszt', 'Zysk', 'Opis'];
+                    $current_client = $client_name;
+                }
+
+                $hours = (float) $row['hours'];
+                $revenue = (float) $row['calculated_value'];
+                $cost = $hours * ($hourly_rates[(int) $row['user_id']] ?? 0);
+                $profit = $revenue - $cost;
+
+                $rows[] = [
+                    $row['work_date'],
+                    $row['client_name'],
+                    $row['project_name'],
+                    $row['service_name'],
+                    $row['display_name'],
+                    number_format($hours, 2, '.', ''),
+                    number_format($revenue, 2, '.', ''),
+                    number_format($cost, 2, '.', ''),
+                    number_format($profit, 2, '.', ''),
+                    $row['description'],
+                ];
+            }
         } else {
             $sql = "SELECT c.name AS client_name, SUM(e.hours) AS godziny, SUM(e.calculated_value) AS kwota
                     FROM {$this->tbl_entries} e
@@ -2778,7 +2904,9 @@ class CRM_OMD_Time_Manager
             exit;
         }
         if (!empty($rows)) {
-            fputcsv($output, array_keys($rows[0]), ';');
+            if (!$detail) {
+                fputcsv($output, array_keys($rows[0]), ';');
+            }
             foreach ($rows as $row) {
                 fputcsv($output, $row, ';');
             }
