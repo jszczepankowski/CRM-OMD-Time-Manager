@@ -19,6 +19,7 @@ class CRM_OMD_Time_Manager
     private string $tbl_services;
     private string $tbl_entries;
     private string $tbl_project_costs;
+    private string $tbl_project_workers;
 
     // Statusy wpisów
     const STATUS_PENDING = 'pending';
@@ -44,6 +45,7 @@ class CRM_OMD_Time_Manager
         $this->tbl_services = $wpdb->prefix . 'crm_omd_services';
         $this->tbl_entries = $wpdb->prefix . 'crm_omd_entries';
         $this->tbl_project_costs = $wpdb->prefix . 'crm_omd_project_costs';
+        $this->tbl_project_workers = $wpdb->prefix . 'crm_omd_project_workers';
 
         register_activation_hook(__FILE__, [$this, 'activate']);
         register_deactivation_hook(__FILE__, [$this, 'deactivate']);
@@ -68,6 +70,10 @@ class CRM_OMD_Time_Manager
         add_action('admin_post_crm_omd_update_worker', [$this, 'handle_update_worker']);
         add_action('admin_post_crm_omd_delete_worker', [$this, 'handle_delete_worker']);
         add_action('admin_post_crm_omd_add_project_cost_front', [$this, 'handle_add_project_cost_front']);
+        add_action('admin_post_crm_omd_update_project_cost_front', [$this, 'handle_update_project_cost_front']);
+        add_action('admin_post_crm_omd_delete_project_cost_front', [$this, 'handle_delete_project_cost_front']);
+        add_action('admin_post_crm_omd_update_project_cost_admin', [$this, 'handle_update_project_cost_admin']);
+        add_action('admin_post_crm_omd_delete_project_cost_admin', [$this, 'handle_delete_project_cost_admin']);
         add_action('admin_post_crm_omd_update_project_status_front', [$this, 'handle_update_project_status_front']);
         add_shortcode('crm_omd_time_tracker', [$this, 'render_tracker_shortcode']);
         add_shortcode('crm_omd_employee_login', [$this, 'render_employee_login_shortcode']);
@@ -160,6 +166,67 @@ class CRM_OMD_Time_Manager
         return in_array(self::ROLE_MANAGER, (array) $user->roles, true)
             || in_array(self::ROLE_LEGACY_MANAGER, (array) $user->roles, true)
             || user_can($user, 'manage_options');
+    }
+
+    private function get_manageable_project_ids_for_user(int $user_id): array
+    {
+        $this->ensure_project_workers_table_exists();
+        if (user_can($user_id, 'manage_options')) {
+            $all_ids = $this->wpdb->get_col("SELECT id FROM {$this->tbl_projects} WHERE is_active = 1");
+            return array_map('intval', $all_ids);
+        }
+
+        $project_ids = $this->wpdb->get_col($this->wpdb->prepare(
+            "SELECT project_id FROM {$this->tbl_project_workers} WHERE user_id = %d",
+            $user_id
+        ));
+
+        return array_values(array_unique(array_map('intval', $project_ids)));
+    }
+
+    private function get_project_worker_ids(int $project_id): array
+    {
+        $this->ensure_project_workers_table_exists();
+        if ($project_id <= 0) {
+            return [];
+        }
+
+        $worker_ids = $this->wpdb->get_col($this->wpdb->prepare(
+            "SELECT user_id FROM {$this->tbl_project_workers} WHERE project_id = %d",
+            $project_id
+        ));
+
+        return array_values(array_unique(array_map('intval', $worker_ids)));
+    }
+
+    private function user_can_manage_project(int $user_id, int $project_id): bool
+    {
+        if ($project_id <= 0 || !$this->user_can_manage_front_projects($user_id)) {
+            return false;
+        }
+
+        if (user_can($user_id, 'manage_options')) {
+            return true;
+        }
+
+        return in_array($project_id, $this->get_manageable_project_ids_for_user($user_id), true);
+    }
+
+    private function fetch_project_cost_rows(int $project_id): array
+    {
+        if ($project_id <= 0) {
+            return [];
+        }
+
+        return $this->wpdb->get_results($this->wpdb->prepare(
+            "SELECT id, project_id, description, cost_value, created_by, created_at FROM {$this->tbl_project_costs} WHERE project_id = %d ORDER BY id DESC",
+            $project_id
+        ));
+    }
+
+    private function get_project_cost_rows(int $project_id): array
+    {
+        return $this->fetch_project_cost_rows($project_id);
     }
 
     public function ensure_roles(): void
@@ -281,6 +348,38 @@ class CRM_OMD_Time_Manager
         }
     }
 
+    private function ensure_project_workers_table_exists(): void
+    {
+        static $checked = false;
+        if ($checked) {
+            return;
+        }
+
+        $checked = true;
+
+        $table_exists = $this->wpdb->get_var($this->wpdb->prepare(
+            "SHOW TABLES LIKE %s",
+            $this->tbl_project_workers
+        ));
+
+        if ($table_exists === $this->tbl_project_workers) {
+            return;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        $charset = $this->wpdb->get_charset_collate();
+        dbDelta("CREATE TABLE {$this->tbl_project_workers} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY project_user (project_id, user_id),
+            KEY project_id (project_id),
+            KEY user_id (user_id)
+        ) $charset;");
+    }
+
     public function activate(): void
     {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -329,6 +428,17 @@ class CRM_OMD_Time_Manager
             created_at DATETIME NOT NULL,
             PRIMARY KEY (id),
             KEY project_id (project_id)
+        ) $charset;");
+
+        dbDelta("CREATE TABLE {$this->tbl_project_workers} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY project_user (project_id, user_id),
+            KEY project_id (project_id),
+            KEY user_id (user_id)
         ) $charset;");
 
         // Tabela usług
@@ -793,16 +903,35 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             return '<p>Dostęp do projektów mają tylko role CRM_manager i administrator.</p>';
         }
 
-        $projects = $this->wpdb->get_results(
-            "SELECT p.id, p.name, p.budget, p.project_status, c.name AS client_name,
-                    COALESCE(SUM(e.hours), 0) AS reported_hours
-             FROM {$this->tbl_projects} p
-             INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
-             LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id
-             WHERE p.is_active = 1
-             GROUP BY p.id, p.name, p.budget, p.project_status, c.name
-             ORDER BY c.name ASC, p.name ASC"
-        );
+        $manageable_project_ids = $this->get_manageable_project_ids_for_user($user_id);
+        $projects = [];
+
+        if (user_can($user_id, 'manage_options')) {
+            $projects = $this->wpdb->get_results(
+                "SELECT p.id, p.name, p.budget, p.project_status, c.name AS client_name,
+                        COALESCE(SUM(e.hours), 0) AS reported_hours
+                 FROM {$this->tbl_projects} p
+                 INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
+                 LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id
+                 WHERE p.is_active = 1
+                 GROUP BY p.id, p.name, p.budget, p.project_status, c.name
+                 ORDER BY c.name ASC, p.name ASC"
+            );
+        } elseif (!empty($manageable_project_ids)) {
+            $placeholders = implode(',', array_fill(0, count($manageable_project_ids), '%d'));
+            $query = $this->wpdb->prepare(
+                "SELECT p.id, p.name, p.budget, p.project_status, c.name AS client_name,
+                        COALESCE(SUM(e.hours), 0) AS reported_hours
+                 FROM {$this->tbl_projects} p
+                 INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
+                 LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id
+                 WHERE p.is_active = 1 AND p.id IN ({$placeholders})
+                 GROUP BY p.id, p.name, p.budget, p.project_status, c.name
+                 ORDER BY c.name ASC, p.name ASC",
+                ...$manageable_project_ids
+            );
+            $projects = $this->wpdb->get_results($query);
+        }
 
         $costs_raw = $this->wpdb->get_results("SELECT project_id, COALESCE(SUM(cost_value), 0) AS total_cost FROM {$this->tbl_project_costs} GROUP BY project_id");
         $costs = [];
@@ -822,11 +951,12 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         echo '<table class="entries-table">';
         echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Status</th><th>Budżet</th><th>Zaraportowane godziny</th><th>Koszty projektu</th><th>Wynik</th></tr></thead><tbody>';
         if (empty($projects)) {
-            echo '<tr><td colspan="7">Brak projektów.</td></tr>';
+            echo '<tr><td colspan="7">Brak projektów przypisanych do Twojego konta.</td></tr>';
         } else {
             foreach ($projects as $project) {
                 $project_id = (int) $project->id;
                 $project_cost = $costs[$project_id] ?? 0.0;
+                $project_cost_rows = $this->fetch_project_cost_rows($project_id);
                 $result = (float) $project->budget - (float) $project->reported_hours - $project_cost;
 
                 echo '<tr>';
@@ -841,7 +971,13 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
                 if ($can_manage) {
                     echo '<tr><td colspan="7">';
-                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions">';
+                    echo '<button type="button" class="crm-omd-open-status-modal" data-modal-target="crm-omd-status-modal-' . $project_id . '">Zmień status</button>';
+                    echo '<div id="crm-omd-status-modal-' . $project_id . '" class="crm-omd-modal" aria-hidden="true">';
+                    echo '<div class="crm-omd-modal__overlay" data-close-modal="1"></div>';
+                    echo '<div class="crm-omd-modal__content" role="dialog" aria-modal="true" aria-label="Zmień status projektu">';
+                    echo '<button type="button" class="crm-omd-modal__close" data-close-modal="1">&times;</button>';
+                    echo '<h3>Zmień status projektu: ' . esc_html($project->name) . '</h3>';
+                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--modal">';
                     wp_nonce_field('crm_omd_update_project_status_' . $project_id);
                     echo '<input type="hidden" name="action" value="crm_omd_update_project_status_front">';
                     echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
@@ -851,18 +987,64 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                         echo '<option value="' . esc_attr($status_key) . '" ' . selected((string) $project->project_status, $status_key, false) . '>' . esc_html($status_label) . '</option>';
                     }
                     echo '</select>';
-                    echo '<button type="submit">Zmień status</button>';
+                    echo '<button type="submit">Zapisz status</button>';
                     echo '</form>';
+                    echo '</div>';
+                    echo '</div>';
 
-                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions">';
+                    echo '<button type="button" class="crm-omd-open-cost-modal" data-modal-target="crm-omd-cost-modal-' . $project_id . '">Dodaj koszt</button>';
+                    echo '<div id="crm-omd-cost-modal-' . $project_id . '" class="crm-omd-modal" aria-hidden="true">';
+                    echo '<div class="crm-omd-modal__overlay" data-close-modal="1"></div>';
+                    echo '<div class="crm-omd-modal__content" role="dialog" aria-modal="true" aria-label="Dodaj koszt projektu">';
+                    echo '<button type="button" class="crm-omd-modal__close" data-close-modal="1">&times;</button>';
+                    echo '<h3>Dodaj koszt projektu: ' . esc_html($project->name) . '</h3>';
+                    echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--modal">';
                     wp_nonce_field('crm_omd_add_project_cost_' . $project_id);
                     echo '<input type="hidden" name="action" value="crm_omd_add_project_cost_front">';
                     echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
-                    echo '<label>Dodaj koszt (ryczałt)</label>';
+                    echo '<label>Opis kosztu</label>';
                     echo '<input type="text" name="cost_description" maxlength="191" placeholder="Opis kosztu" required>';
+                    echo '<label>Wartość kosztu</label>';
                     echo '<input type="number" name="cost_value" step="0.01" min="0" placeholder="Wartość kosztu" required>';
-                    echo '<button type="submit">Dodaj koszt</button>';
+                    echo '<button type="submit">Zapisz koszt</button>';
                     echo '</form>';
+                    echo '</div>';
+                    echo '</div>';
+
+                    echo '<div class="crm-omd-project-cost-list">';
+                    echo '<h4>Koszty projektu</h4>';
+                    if (empty($project_cost_rows)) {
+                        echo '<p>Brak kosztów dla projektu.</p>';
+                    } else {
+                        echo '<table class="entries-table"><thead><tr><th>Dane kosztu</th><th>Akcje</th></tr></thead><tbody>';
+                        foreach ($project_cost_rows as $cost_row) {
+                            $cost_id = (int) $cost_row->id;
+                            echo '<tr>';
+                            echo '<td>';
+                            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--cost-inline">';
+                            wp_nonce_field('crm_omd_update_project_cost_front_' . $cost_id);
+                            echo '<input type="hidden" name="action" value="crm_omd_update_project_cost_front">';
+                            echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
+                            echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
+                            echo '<input type="text" name="cost_description" maxlength="191" value="' . esc_attr((string) $cost_row->description) . '" required>';
+                            echo '<input type="number" name="cost_value" step="0.01" min="0" value="' . esc_attr(number_format((float) $cost_row->cost_value, 2, '.', '')) . '" required>';
+                            echo '<button type="submit">Zapisz</button>';
+                            echo '</form>';
+                            echo '</td>';
+                            echo '<td>';
+                            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--cost-delete" onsubmit="return confirm(\'Usunąć koszt projektu?\');">';
+                            wp_nonce_field('crm_omd_delete_project_cost_front_' . $cost_id);
+                            echo '<input type="hidden" name="action" value="crm_omd_delete_project_cost_front">';
+                            echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
+                            echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
+                            echo '<button type="submit" class="secondary">Usuń</button>';
+                            echo '</form>';
+                            echo '</td>';
+                            echo '</tr>';
+                        }
+                        echo '</tbody></table>';
+                    }
+                    echo '</div>';
                     echo '</td></tr>';
                 }
             }
@@ -1272,6 +1454,10 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
         check_admin_referer('crm_omd_update_project_status_' . $project_id);
 
+        if (!$this->user_can_manage_project($user_id, $project_id)) {
+            wp_die(esc_html__('Nie możesz zarządzać tym projektem.', 'crm-omd-time-manager'));
+        }
+
         if (!array_key_exists($status, $this->get_project_statuses())) {
             wp_die(esc_html__('Nieprawidłowy status projektu.', 'crm-omd-time-manager'));
         }
@@ -1309,6 +1495,10 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
         check_admin_referer('crm_omd_add_project_cost_' . $project_id);
 
+        if (!$this->user_can_manage_project($user_id, $project_id)) {
+            wp_die(esc_html__('Nie możesz zarządzać tym projektem.', 'crm-omd-time-manager'));
+        }
+
         $this->wpdb->insert(
             $this->tbl_project_costs,
             [
@@ -1322,6 +1512,118 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         );
 
         wp_safe_redirect(add_query_arg(['crm_omd_tab' => 'projects', 'project_updated' => '1'], home_url('/panel-pracownika/')));
+        exit;
+    }
+
+    public function handle_update_project_cost_front(): void
+    {
+        if (!is_user_logged_in()) {
+            wp_die(esc_html__('Musisz być zalogowany.', 'crm-omd-time-manager'));
+        }
+
+        $user_id = get_current_user_id();
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $cost_id = isset($_POST['cost_id']) ? (int) $_POST['cost_id'] : 0;
+        $description = isset($_POST['cost_description']) ? sanitize_text_field(wp_unslash($_POST['cost_description'])) : '';
+        $cost_value = isset($_POST['cost_value']) ? (float) $_POST['cost_value'] : 0;
+
+        check_admin_referer('crm_omd_update_project_cost_front_' . $cost_id);
+
+        if ($project_id <= 0 || $cost_id <= 0 || $description === '' || $cost_value < 0) {
+            wp_die(esc_html__('Wypełnij poprawnie dane kosztu.', 'crm-omd-time-manager'));
+        }
+
+        if (!$this->user_can_manage_project($user_id, $project_id)) {
+            wp_die(esc_html__('Nie możesz zarządzać tym projektem.', 'crm-omd-time-manager'));
+        }
+
+        $this->wpdb->update(
+            $this->tbl_project_costs,
+            ['description' => $description, 'cost_value' => $cost_value],
+            ['id' => $cost_id, 'project_id' => $project_id],
+            ['%s', '%f'],
+            ['%d', '%d']
+        );
+
+        wp_safe_redirect(add_query_arg(['crm_omd_tab' => 'projects', 'project_updated' => '1'], home_url('/panel-pracownika/')));
+        exit;
+    }
+
+    public function handle_delete_project_cost_front(): void
+    {
+        if (!is_user_logged_in()) {
+            wp_die(esc_html__('Musisz być zalogowany.', 'crm-omd-time-manager'));
+        }
+
+        $user_id = get_current_user_id();
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $cost_id = isset($_POST['cost_id']) ? (int) $_POST['cost_id'] : 0;
+
+        check_admin_referer('crm_omd_delete_project_cost_front_' . $cost_id);
+
+        if ($project_id <= 0 || $cost_id <= 0) {
+            wp_die(esc_html__('Nieprawidłowy koszt projektu.', 'crm-omd-time-manager'));
+        }
+
+        if (!$this->user_can_manage_project($user_id, $project_id)) {
+            wp_die(esc_html__('Nie możesz zarządzać tym projektem.', 'crm-omd-time-manager'));
+        }
+
+        $this->wpdb->delete(
+            $this->tbl_project_costs,
+            ['id' => $cost_id, 'project_id' => $project_id],
+            ['%d', '%d']
+        );
+
+        wp_safe_redirect(add_query_arg(['crm_omd_tab' => 'projects', 'project_updated' => '1'], home_url('/panel-pracownika/')));
+        exit;
+    }
+
+    public function handle_update_project_cost_admin(): void
+    {
+        $this->require_admin_access();
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $cost_id = isset($_POST['cost_id']) ? (int) $_POST['cost_id'] : 0;
+        $description = isset($_POST['cost_description']) ? sanitize_text_field(wp_unslash($_POST['cost_description'])) : '';
+        $cost_value = isset($_POST['cost_value']) ? (float) $_POST['cost_value'] : 0;
+
+        check_admin_referer('crm_omd_update_project_cost_admin_' . $cost_id);
+
+        if ($project_id <= 0 || $cost_id <= 0 || $description === '' || $cost_value < 0) {
+            wp_die(esc_html__('Wypełnij poprawnie dane kosztu.', 'crm-omd-time-manager'));
+        }
+
+        $this->wpdb->update(
+            $this->tbl_project_costs,
+            ['description' => $description, 'cost_value' => $cost_value],
+            ['id' => $cost_id, 'project_id' => $project_id],
+            ['%s', '%f'],
+            ['%d', '%d']
+        );
+
+        wp_safe_redirect(admin_url('admin.php?page=crm-omd-projects'));
+        exit;
+    }
+
+    public function handle_delete_project_cost_admin(): void
+    {
+        $this->require_admin_access();
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $cost_id = isset($_POST['cost_id']) ? (int) $_POST['cost_id'] : 0;
+
+        check_admin_referer('crm_omd_delete_project_cost_admin_' . $cost_id);
+
+        if ($project_id <= 0 || $cost_id <= 0) {
+            wp_die(esc_html__('Nieprawidłowy koszt projektu.', 'crm-omd-time-manager'));
+        }
+
+        $this->wpdb->delete(
+            $this->tbl_project_costs,
+            ['id' => $cost_id, 'project_id' => $project_id],
+            ['%d', '%d']
+        );
+
+        wp_safe_redirect(admin_url('admin.php?page=crm-omd-projects'));
         exit;
     }
 
@@ -2273,6 +2575,12 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
         $edit_id = isset($_GET['edit_project']) ? (int) $_GET['edit_project'] : 0;
         $edit = $edit_id ? $this->wpdb->get_row($this->wpdb->prepare("SELECT * FROM {$this->tbl_projects} WHERE id = %d", $edit_id)) : null;
+        $project_worker_ids = $edit ? $this->get_project_worker_ids((int) $edit->id) : [];
+        $assignable_workers = get_users([
+            'role__in' => [self::ROLE_EMPLOYEE, self::ROLE_MANAGER, self::ROLE_LEGACY_EMPLOYEE, self::ROLE_LEGACY_MANAGER],
+            'orderby'  => 'display_name',
+            'order'    => 'ASC',
+        ]);
 
         echo '<div class="wrap">';
         echo '<h1>Projekty</h1>';
@@ -2315,6 +2623,17 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="form-field">
+                    <label for="assigned_workers">Przypisani pracownicy</label>
+                    <select name="assigned_workers[]" id="assigned_workers" class="crm-omd-full-width-field" multiple size="8">
+                        <?php foreach ($assignable_workers as $worker): ?>
+                            <option value="<?php echo (int) $worker->ID; ?>" <?php selected(in_array((int) $worker->ID, $project_worker_ids, true), true); ?>>
+                                <?php echo esc_html($worker->display_name . ' (' . $worker->user_email . ')'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="description">Tylko przypisani użytkownicy mogą zarządzać kosztem i budżetem projektu w panelu pracownika.</p>
+                </div>
                 <div class="form-field" style="display: flex; align-items: center;background: #d0a46c;border-color: #b58b54;color: #212123;padding: 12px 10px 10px 10px;margin-top: 24px">
                     <label style="margin-right: 10px;">
                         <input type="checkbox" name="is_active" value="1" <?php checked($edit ? (int) $edit->is_active : 1, 1); ?>>
@@ -2343,6 +2662,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             foreach ($group['projects'] as $project) {
                 $reported_hours = (float) $this->wpdb->get_var($this->wpdb->prepare("SELECT COALESCE(SUM(hours), 0) FROM {$this->tbl_entries} WHERE project_id = %d", (int) $project->id));
                 $project_costs = (float) $this->wpdb->get_var($this->wpdb->prepare("SELECT COALESCE(SUM(cost_value), 0) FROM {$this->tbl_project_costs} WHERE project_id = %d", (int) $project->id));
+                $project_cost_rows = $this->fetch_project_cost_rows((int) $project->id);
                 $project_result = (float) $project->budget - $reported_hours - $project_costs;
 
                 echo '<tr>';
@@ -2359,6 +2679,42 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                 echo '<a class="button" href="' . esc_url(wp_nonce_url(admin_url('admin-post.php?action=crm_omd_delete_project&id=' . (int) $project->id), 'crm_omd_delete_project_' . (int) $project->id)) . '" onclick="return confirm(\'Usunięcie projektu spowoduje również usunięcie wszystkich powiązanych wpisów godzinowych. Kontynuować?\');">Usuń trwale</a>';
                 echo '</td>';
                 echo '</tr>';
+
+                echo '<tr><td colspan="9">';
+                echo '<strong>Koszty projektu:</strong>';
+                if (empty($project_cost_rows)) {
+                    echo '<p>Brak kosztów dla projektu.</p>';
+                } else {
+                    echo '<table class="widefat striped crm-omd-table" style="margin-top:8px;">';
+                    echo '<thead><tr><th>Dane kosztu</th><th>Akcje</th></tr></thead><tbody>';
+                    foreach ($project_cost_rows as $cost_row) {
+                        $cost_id = (int) $cost_row->id;
+                        echo '<tr>';
+                        echo '<td>';
+                        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="display:flex;gap:8px;align-items:center;">';
+                        wp_nonce_field('crm_omd_update_project_cost_admin_' . $cost_id);
+                        echo '<input type="hidden" name="action" value="crm_omd_update_project_cost_admin">';
+                        echo '<input type="hidden" name="project_id" value="' . (int) $project->id . '">';
+                        echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
+                        echo '<input type="text" name="cost_description" value="' . esc_attr((string) $cost_row->description) . '" maxlength="191" required style="min-width:260px;">';
+                        echo '<input type="number" name="cost_value" step="0.01" min="0" value="' . esc_attr(number_format((float) $cost_row->cost_value, 2, '.', '')) . '" required>';
+                        echo '<button type="submit" class="button">Zapisz</button>';
+                        echo '</form>';
+                        echo '</td>';
+                        echo '<td>';
+                        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="display:inline-block;" onsubmit="return confirm(\'Usunąć koszt projektu?\');">';
+                        wp_nonce_field('crm_omd_delete_project_cost_admin_' . $cost_id);
+                        echo '<input type="hidden" name="action" value="crm_omd_delete_project_cost_admin">';
+                        echo '<input type="hidden" name="project_id" value="' . (int) $project->id . '">';
+                        echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
+                        echo '<button type="submit" class="button">Usuń</button>';
+                        echo '</form>';
+                        echo '</td>';
+                        echo '</tr>';
+                    }
+                    echo '</tbody></table>';
+                }
+                echo '</td></tr>';
             }
         }
         echo '</tbody></table>';
@@ -2368,6 +2724,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
     public function handle_save_project(): void
     {
+        $this->ensure_project_workers_table_exists();
         $this->require_admin_access();
         check_admin_referer('crm_omd_save_project');
 
@@ -2377,6 +2734,10 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         $budget = isset($_POST['budget']) ? (float) $_POST['budget'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
         $project_status = isset($_POST['project_status']) ? sanitize_text_field(wp_unslash($_POST['project_status'])) : self::PROJECT_STATUS_IN_PROGRESS;
+        $assigned_workers_raw = isset($_POST['assigned_workers']) && is_array($_POST['assigned_workers']) ? wp_unslash($_POST['assigned_workers']) : [];
+        $assigned_worker_ids = array_values(array_unique(array_filter(array_map('intval', $assigned_workers_raw), static function (int $id): bool {
+            return $id > 0;
+        })));
         if (!array_key_exists($project_status, $this->get_project_statuses())) {
             $project_status = self::PROJECT_STATUS_IN_PROGRESS;
         }
@@ -2412,6 +2773,23 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                 ],
                 ['%d', '%s', '%f', '%s', '%d', '%s', '%s']
             );
+
+            $id = (int) $this->wpdb->insert_id;
+        }
+
+        if ($id > 0) {
+            $this->wpdb->delete($this->tbl_project_workers, ['project_id' => $id], ['%d']);
+            foreach ($assigned_worker_ids as $worker_id) {
+                $this->wpdb->insert(
+                    $this->tbl_project_workers,
+                    [
+                        'project_id' => $id,
+                        'user_id'    => $worker_id,
+                        'created_at' => current_time('mysql'),
+                    ],
+                    ['%d', '%d', '%s']
+                );
+            }
         }
 
         wp_safe_redirect(admin_url('admin.php?page=crm-omd-projects'));
@@ -2420,12 +2798,14 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
     public function handle_delete_project(): void
     {
+        $this->ensure_project_workers_table_exists();
         $this->require_admin_access();
         $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
         check_admin_referer('crm_omd_delete_project_' . $id);
 
         // Najpierw usuń wpisy powiązane z projektem
         $this->wpdb->delete($this->tbl_entries, ['project_id' => $id], ['%d']);
+        $this->wpdb->delete($this->tbl_project_workers, ['project_id' => $id], ['%d']);
         // Potem usuń projekt
         $this->wpdb->delete($this->tbl_projects, ['id' => $id], ['%d']);
 
@@ -2943,13 +3323,32 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         $client_id = isset($_GET['client_id']) ? (int) $_GET['client_id'] : 0;
         $project_id = isset($_GET['project_id']) ? (int) $_GET['project_id'] : 0;
         $detail = isset($_GET['detail']) ? 1 : 0;
+        $settlement_type = isset($_GET['settlement_type']) ? sanitize_text_field(wp_unslash($_GET['settlement_type'])) : 'hours';
+        if (!in_array($settlement_type, ['hours', 'projects'], true)) {
+            $settlement_type = 'hours';
+        }
         
         // Sortowanie
         $order_by = isset($_GET['order_by']) ? sanitize_text_field(wp_unslash($_GET['order_by'])) : ($detail ? 'work_date' : 'client_name');
         $order_dir = isset($_GET['order_dir']) ? strtoupper(sanitize_text_field(wp_unslash($_GET['order_dir']))) : 'ASC';
         
         // Dozwolone kolumny do sortowania
-        if ($detail) {
+        if ($settlement_type === 'projects') {
+            $allowed_order = ['client_name', 'project_name', 'budget', 'hours_sum', 'project_cost_sum', 'result_sum'];
+            $order_column = $order_by;
+            if (!in_array($order_column, $allowed_order, true)) {
+                $order_column = 'client_name';
+            }
+            $order_map = [
+                'client_name' => 'client_name',
+                'project_name' => 'project_name',
+                'budget' => 'budget',
+                'hours_sum' => 'hours_sum',
+                'project_cost_sum' => 'project_cost_sum',
+                'result_sum' => 'result_sum',
+            ];
+            $sql_order_by = $order_map[$order_column] ?? 'client_name';
+        } elseif ($detail) {
             $allowed_order = ['work_date', 'client_name', 'project_name', 'service_name', 'display_name', 'hours', 'calculated_value'];
             $order_column = $order_by;
             if (!in_array($order_column, $allowed_order, true)) {
@@ -2994,7 +3393,32 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             $params[] = $project_id;
         }
 
-        if ($detail) {
+        if ($settlement_type === 'projects') {
+            $sql = "SELECT c.name AS client_name, p.name AS project_name, p.budget,
+                        COALESCE(SUM(e.hours), 0) AS hours_sum,
+                        COALESCE(pc.total_cost, 0) AS project_cost_sum,
+                        (p.budget - COALESCE(SUM(e.hours), 0) - COALESCE(pc.total_cost, 0)) AS result_sum
+                    FROM {$this->tbl_projects} p
+                    INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
+                    LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id AND e.status = 'approved' AND e.work_date BETWEEN %s AND %s
+                    LEFT JOIN (
+                        SELECT project_id, COALESCE(SUM(cost_value), 0) AS total_cost
+                        FROM {$this->tbl_project_costs}
+                        GROUP BY project_id
+                    ) pc ON pc.project_id = p.id
+                    WHERE p.is_active = 1";
+            $project_params = [$date_from, $date_to];
+            if ($client_id) {
+                $sql .= ' AND p.client_id = %d';
+                $project_params[] = $client_id;
+            }
+            if ($project_id) {
+                $sql .= ' AND p.id = %d';
+                $project_params[] = $project_id;
+            }
+            $sql .= " GROUP BY p.id, c.name, p.name, p.budget, pc.total_cost ORDER BY {$sql_order_by} {$sql_order_dir}";
+            $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$project_params));
+        } elseif ($detail) {
             // Dodajemy e.user_id, aby móc pobrać stawkę pracownika
             $sql = "SELECT e.user_id, e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
                     FROM {$this->tbl_entries} e
@@ -3024,11 +3448,16 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
         echo '<div class="wrap">';
         echo '<h1>Raporty</h1>';
+        echo '<h2 class="nav-tab-wrapper">';
+        echo '<a class="nav-tab ' . ($settlement_type === 'hours' ? 'nav-tab-active' : '') . '" href="' . esc_url(add_query_arg(['settlement_type' => 'hours', 'detail' => $detail], admin_url('admin.php?page=crm-omd-reports'))) . '">Rozliczenie godzin</a>';
+        echo '<a class="nav-tab ' . ($settlement_type === 'projects' ? 'nav-tab-active' : '') . '" href="' . esc_url(add_query_arg(['settlement_type' => 'projects', 'detail' => 0], admin_url('admin.php?page=crm-omd-reports'))) . '">Projekty</a>';
+        echo '</h2>';
 
         // Panel filtrów
         echo '<div class="crm-omd-filters-bar">';
         echo '<form method="get" style="display: contents;" id="crm-omd-report-form">';
         echo '<input type="hidden" name="page" value="crm-omd-reports">';
+        echo '<input type="hidden" name="settlement_type" value="' . esc_attr($settlement_type) . '">';
         echo '<label>Miesiąc: <select name="month" id="report-month">';
         echo $this->get_month_options($month);
         echo '</select></label>';
@@ -3046,7 +3475,9 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             echo '<option value="' . (int) $project->id . '"' . selected($project_id, (int) $project->id, false) . '>' . esc_html($project->name) . '</option>';
         }
         echo '</select></label>';
-        echo '<label><input type="checkbox" name="detail" value="1"  style="min-width: 16px;"' . checked($detail, 1, false) . '> Szczegółowy</label>';
+        if ($settlement_type === 'hours') {
+            echo '<label><input type="checkbox" name="detail" value="1"  style="min-width: 16px;"' . checked($detail, 1, false) . '> Szczegółowy</label>';
+        }
         // Zachowaj sortowanie przy zmianie filtrów
         echo '<input type="hidden" name="order_by" value="' . esc_attr($order_by) . '">';
         echo '<input type="hidden" name="order_dir" value="' . esc_attr($order_dir) . '">';
@@ -3064,6 +3495,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         echo '<input type="hidden" name="client_id" value="' . (int) $client_id . '">';
         echo '<input type="hidden" name="project_id" value="' . (int) $project_id . '">';
         echo '<input type="hidden" name="detail" value="' . (int) $detail . '">';
+        echo '<input type="hidden" name="settlement_type" value="' . esc_attr($settlement_type) . '">';
         echo '<button type="submit" class="button">Eksport do Excel (CSV)</button>';
         echo '</form>';
 
@@ -3073,7 +3505,15 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         echo '<table class="widefat striped crm-omd-table">';
         echo '<thead><tr>';
 
-        if ($detail) {
+        if ($settlement_type === 'projects') {
+            $base_url = remove_query_arg(['order_by', 'order_dir']);
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'client_name', 'order_dir' => ($order_by === 'client_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Klient</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'project_name', 'order_dir' => ($order_by === 'project_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Projekt</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'budget', 'order_dir' => ($order_by === 'budget' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Budżet</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'hours_sum', 'order_dir' => ($order_by === 'hours_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Zaraportowane godziny</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'project_cost_sum', 'order_dir' => ($order_by === 'project_cost_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Koszty projektu</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'result_sum', 'order_dir' => ($order_by === 'result_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Wynik</a></th>';
+        } elseif ($detail) {
             $base_url = remove_query_arg(['order_by', 'order_dir']);
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'work_date', 'order_dir' => ($order_by === 'work_date' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Data</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'client_name', 'order_dir' => ($order_by === 'client_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Klient</a></th>';
@@ -3099,7 +3539,19 @@ private function get_daily_summary_html(int $user_id, string $month): string {
 
         foreach ($rows as $row) {
             echo '<tr>';
-            if ($detail) {
+            if ($settlement_type === 'projects') {
+                echo '<td>' . esc_html($row->client_name) . '</td>';
+                echo '<td>' . esc_html($row->project_name) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $row->budget, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $row->hours_sum, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $row->project_cost_sum, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $row->result_sum, 2, ',', ' ')) . '</td>';
+
+                $total_hours += (float) $row->hours_sum;
+                $total_value += (float) $row->budget;
+                $total_cost += (float) $row->project_cost_sum;
+                $total_profit += (float) $row->result_sum;
+            } elseif ($detail) {
                 $hourly_rate = isset($hourly_rates[$row->user_id]) ? $hourly_rates[$row->user_id] : 0;
                 // Uproszczenie: koszt liczony tylko dla wpisów z godzinami > 0 (zakładamy, że to wpisy godzinowe)
                 $cost = ($row->hours > 0) ? $row->hours * $hourly_rate : 0;
@@ -3131,7 +3583,12 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         }
 
         echo '</tbody><tfoot><tr>';
-        if ($detail) {
+        if ($settlement_type === 'projects') {
+            echo '<th colspan="3">SUMA</th>';
+            echo '<th>' . esc_html(number_format($total_hours, 2, ',', ' ')) . '</th>';
+            echo '<th>' . esc_html(number_format($total_cost, 2, ',', ' ')) . '</th>';
+            echo '<th>' . esc_html(number_format($total_profit, 2, ',', ' ')) . '</th>';
+        } elseif ($detail) {
             echo '<th colspan="6">SUMA</th>';
             echo '<th>' . esc_html(number_format($total_value, 2, ',', ' ')) . '</th>';
             echo '<th>' . esc_html(number_format($total_cost, 2, ',', ' ')) . '</th>';
@@ -3178,6 +3635,10 @@ private function get_daily_summary_html(int $user_id, string $month): string {
         $client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : 0;
         $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
         $detail = isset($_POST['detail']) ? (int) $_POST['detail'] : 0;
+        $settlement_type = isset($_POST['settlement_type']) ? sanitize_text_field(wp_unslash($_POST['settlement_type'])) : 'hours';
+        if (!in_array($settlement_type, ['hours', 'projects'], true)) {
+            $settlement_type = 'hours';
+        }
 
         $where = "WHERE e.status = 'approved' AND e.work_date BETWEEN %s AND %s";
         $params = [$date_from, $date_to];
@@ -3190,7 +3651,32 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             $params[] = $project_id;
         }
 
-        if ($detail) {
+        if ($settlement_type === 'projects') {
+            $sql = "SELECT c.name AS client_name, p.name AS project_name, p.budget,
+                        COALESCE(SUM(e.hours), 0) AS hours_sum,
+                        COALESCE(pc.total_cost, 0) AS project_cost_sum,
+                        (p.budget - COALESCE(SUM(e.hours), 0) - COALESCE(pc.total_cost, 0)) AS result_sum
+                    FROM {$this->tbl_projects} p
+                    INNER JOIN {$this->tbl_clients} c ON c.id = p.client_id
+                    LEFT JOIN {$this->tbl_entries} e ON e.project_id = p.id AND e.status = 'approved' AND e.work_date BETWEEN %s AND %s
+                    LEFT JOIN (
+                        SELECT project_id, COALESCE(SUM(cost_value), 0) AS total_cost
+                        FROM {$this->tbl_project_costs}
+                        GROUP BY project_id
+                    ) pc ON pc.project_id = p.id
+                    WHERE p.is_active = 1";
+            $project_params = [$date_from, $date_to];
+            if ($client_id) {
+                $sql .= ' AND p.client_id = %d';
+                $project_params[] = $client_id;
+            }
+            if ($project_id) {
+                $sql .= ' AND p.id = %d';
+                $project_params[] = $project_id;
+            }
+            $sql .= ' GROUP BY p.id, c.name, p.name, p.budget, pc.total_cost ORDER BY c.name ASC, p.name ASC';
+            $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$project_params), ARRAY_A);
+        } elseif ($detail) {
             $sql = "SELECT e.user_id, e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
                     FROM {$this->tbl_entries} e
                     INNER JOIN {$this->tbl_clients} c ON c.id = e.client_id
@@ -3260,7 +3746,9 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             exit;
         }
         if (!empty($rows)) {
-            if (!$detail) {
+            if ($settlement_type === 'projects') {
+                fputcsv($output, ['client_name', 'project_name', 'budget', 'hours_sum', 'project_cost_sum', 'result_sum'], ';');
+            } elseif (!$detail) {
                 fputcsv($output, array_keys($rows[0]), ';');
             }
             foreach ($rows as $row) {
