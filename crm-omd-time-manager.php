@@ -2334,10 +2334,12 @@ class CRM_OMD_Time_Manager
 
         $summary = $this->wpdb->get_results($this->wpdb->prepare("
             SELECT user_id,
-                   SUM(hours) AS total_hours,
-                   SUM(calculated_value) AS total_revenue
+                   SUM(CASE WHEN status = 'approved' THEN hours ELSE 0 END) AS total_hours,
+                   SUM(CASE WHEN status = 'approved_off' THEN hours ELSE 0 END) AS total_off_hours,
+                   SUM(CASE WHEN status = 'approved' THEN calculated_value ELSE 0 END) AS total_revenue
             FROM {$this->tbl_entries}
-            WHERE work_date BETWEEN %s AND %s AND status = 'approved'
+            WHERE work_date BETWEEN %s AND %s
+              AND status IN ('approved', 'approved_off')
             GROUP BY user_id
         ", $admin_date_from, $admin_date_to), OBJECT_K);
 
@@ -2435,6 +2437,7 @@ class CRM_OMD_Time_Manager
                 <tr>
                     <th>Pracownik</th>
                     <th>Zaraportowane godziny</th>
+                    <th>Zaakceptowane OFF</th>
                     <th>Godziny do przepracowania</th>
                     <th>Różnica godzin</th>
                     <th>Wypracowany zysk (PLN)</th>
@@ -2446,17 +2449,20 @@ class CRM_OMD_Time_Manager
             <tbody>
                 <?php foreach ($users as $user):
                     $reported = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_hours : 0;
+                    $approved_off = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_off_hours : 0;
                     $revenue  = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_revenue : 0;
                     $salary = (float) get_user_meta($user->ID, 'crm_omd_worker_monthly_salary', true);
                     $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
                     $cost = $reported * $hourly_rate; // uproszczenie – tylko godziny
                     $profit_net = $revenue - $cost;
+                    $hours_to_work = max(0, $admin_expected_hours - $approved_off);
                 ?>
                 <tr>
                     <td><?php echo esc_html($user->display_name); ?></td>
                     <td><?php echo esc_html(number_format($reported, 2, ',', ' ')); ?></td>
-                    <td><?php echo esc_html((string) $admin_expected_hours); ?></td>
-                    <td><?php echo esc_html(number_format($reported - $admin_expected_hours, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($approved_off, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($hours_to_work, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($reported - $hours_to_work, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($revenue, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($salary, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($cost, 2, ',', ' ')); ?></td>
