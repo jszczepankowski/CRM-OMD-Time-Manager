@@ -377,6 +377,59 @@ textarea::placeholder {
     font-size: 12px;
 }
 
+.crm-omd-calendar .calendar-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    margin-top: 20px;
+}
+
+.crm-omd-calendar .calendar-table th {
+  background: #ddb178;
+  color: #212123;
+  font-weight: 600;
+  text-align: center;
+  padding: 0.8em 1em;
+  font-size: 12px;
+}
+
+.crm-omd-calendar .calendar-table td {
+    border: 1px solid #ddd;
+    height: 55px;
+    vertical-align: middle;
+    padding: 5px;
+    position: relative;
+	text-align: center;
+}
+
+.crm-omd-calendar .calendar-table td.empty-day {
+    background: #f9f9f9;
+}
+
+.crm-omd-calendar .calendar-table td .day-number {
+    font-size: 12px;
+    margin-bottom: 5px;
+	color: #333333;
+}
+
+.crm-omd-calendar .calendar-table td .day-hours {
+    font-size: 12px;
+    color: #ddb178;
+	font-weight: bold;
+}
+
+.crm-omd-calendar .calendar-table td .day-hours.no-hours {
+    color: #999;
+    font-style: italic;
+}
+
+.crm-omd-tabs { display:flex; gap:10px; margin-bottom:16px; }
+.crm-omd-tab { padding:8px 14px; border-radius:6px; text-decoration:none; color:#333333; background:#fff3e0; font-size: 12px; border: 1px solid #ddb178;}
+.crm-omd-tab.is-active { background:#ddb178; font-weight:600; font-size: 12px;}
+.crm-omd-project-actions {display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; align-items:end; margin:10px 0; }
+.crm-omd-project-alert { background:#d4edda; color:#155724; border:1px solid #c3e6cb; padding:8px 10px; border-radius:4px; }
+
 /* Responsywność */
 @media (max-width: 600px) {
     .crm-omd-frontend {
@@ -405,8 +458,3 @@ textarea::placeholder {
         align-items: stretch;
     }
 }
-.crm-omd-tabs { display:flex; gap:10px; margin-bottom:16px; }
-.crm-omd-tab { padding:8px 14px; border:1px solid #ddb178; border-radius:6px; text-decoration:none; color:#212123; background:#fff; }
-.crm-omd-tab.is-active { background:#ddb178; font-weight:600; }
-.crm-omd-project-actions { display:grid; grid-template-columns: 1fr 1fr auto; gap:10px; align-items:end; margin:10px 0; }
-.crm-omd-project-alert { background:#d4edda; color:#155724; border:1px solid #c3e6cb; padding:8px 10px; border-radius:4px; }
