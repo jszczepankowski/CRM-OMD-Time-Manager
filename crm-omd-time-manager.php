@@ -582,60 +582,97 @@ class CRM_OMD_Time_Manager
         return ob_get_clean();
     }
 
-    /**
-     * Generuje tabelę z dziennym podsumowaniem godzin.
-     */
-    private function get_daily_summary_html(int $user_id, string $month): string {
-        [$date_from, $date_to] = $this->get_month_boundaries($month);
-        $results = $this->wpdb->get_results(
-            $this->wpdb->prepare(
-                "SELECT work_date, SUM(hours) as total_hours
-                FROM {$this->tbl_entries}
-                WHERE user_id = %d AND work_date BETWEEN %s AND %s
-                GROUP BY work_date
-                ORDER BY work_date ASC",
-                $user_id,
-                $date_from,
-                $date_to
-            )
-        );
+   /**
+ * Generuje widok kalendarza z dziennym podsumowaniem godzin (bez statusów).
+ */
+private function get_daily_summary_html(int $user_id, string $month): string {
+    [$date_from, $date_to] = $this->get_month_boundaries($month);
+    
+    // Pobierz wszystkie wpisy dla tego miesiąca, aby znać łączną liczbę godzin na dzień
+    $results = $this->wpdb->get_results(
+        $this->wpdb->prepare(
+            "SELECT work_date, SUM(hours) as total_hours
+            FROM {$this->tbl_entries}
+            WHERE user_id = %d AND work_date BETWEEN %s AND %s
+            GROUP BY work_date
+            ORDER BY work_date ASC",
+            $user_id,
+            $date_from,
+            $date_to
+        )
+    );
 
-        $daily_totals = [];
-        foreach ($results as $row) {
-            $daily_totals[$row->work_date] = (float) $row->total_hours;
-        }
-
-        $start = new DateTime($date_from);
-        $end = new DateTime($date_to);
-        $interval = new DateInterval('P1D');
-        $period = new DatePeriod($start, $interval, $end->modify('+1 day'));
-
-        ob_start();
-        echo '<h3>Podsumowanie dzienne</h3>';
-        echo '<table class="daily-summary-table" style="margin-top: 20px; width: 100%; border-collapse: collapse;">';
-        echo '<thead><tr><th>Data</th><th>Łączna liczba godzin</th></tr></thead><tbody>';
-
-        $has_any = false;
-        foreach ($period as $date) {
-            $date_str = $date->format('Y-m-d');
-            $display_date = date_i18n('d.m.Y', $date->getTimestamp());
-            $hours = isset($daily_totals[$date_str]) ? $daily_totals[$date_str] : 0;
-            if ($hours > 0) {
-                $has_any = true;
-            }
-            echo '<tr>';
-            echo '<td>' . esc_html($display_date) . '</td>';
-            echo '<td>' . esc_html(number_format($hours, 2, ',', ' ')) . '</td>';
-            echo '</tr>';
-        }
-
-        if (!$has_any) {
-            echo '<tr><td colspan="2">Brak wpisów w tym miesiącu.</td></tr>';
-        }
-
-        echo '</tbody></table>';
-        return ob_get_clean();
+    // Przygotuj tablicę z sumami godzin na dzień
+    $daily_totals = [];
+    foreach ($results as $row) {
+        $daily_totals[$row->work_date] = (float) $row->total_hours;
     }
+
+    $first_day = new DateTime($date_from);
+    $last_day  = new DateTime($date_to);
+    $days_in_month = (int) $last_day->format('d');
+    $first_day_of_week = (int) $first_day->format('N'); // 1 = poniedziałek, 7 = niedziela
+
+    // Przygotuj tablicę z dniami (puste komórki przed 1. dniem)
+    $calendar_days = [];
+    for ($i = 1; $i < $first_day_of_week; $i++) {
+        $calendar_days[] = null; // pusta komórka
+    }
+    for ($day = 1; $day <= $days_in_month; $day++) {
+        $date_str = sprintf('%s-%02d', $month, $day);
+        $calendar_days[] = isset($daily_totals[$date_str]) ? $daily_totals[$date_str] : 0;
+    }
+
+    $weekdays = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Niedz'];
+
+    ob_start();
+    ?>
+    <div class="crm-omd-calendar">
+        <h2>Podsumowanie miesięczne – kalendarz</h2>
+        <table class="calendar-table">
+            <thead>
+                <tr>
+                    <?php foreach ($weekdays as $wd): ?>
+                        <th><?php echo esc_html($wd); ?></th>
+                    <?php endforeach; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $day_index = 0;
+                $total_cells = count($calendar_days);
+                while ($day_index < $total_cells) {
+                    echo '<tr>';
+                    for ($col = 0; $col < 7; $col++) {
+                        if ($day_index < $total_cells) {
+                            $day_data = $calendar_days[$day_index];
+                            if ($day_data === null) {
+                                echo '<td class="empty-day"></td>';
+                            } else {
+                                $hours = number_format((float) $day_data, 2, ',', ' ');
+                                echo '<td>';
+                                echo '<div class="day-number">' . esc_html($day_index + 1 - ($first_day_of_week - 1)) . '</div>';
+                                if ($day_data > 0) {
+                                    echo '<div class="day-hours">' . esc_html($hours) . ' </div>';
+                                } else {
+                                    echo '<div class="day-hours no-hours">–</div>';
+                                }
+                                echo '</td>';
+                            }
+                        } else {
+                            echo '<td class="empty-day"></td>';
+                        }
+                        $day_index++;
+                    }
+                    echo '</tr>';
+                }
+                ?>
+            </tbody>
+        </table>
+    </div>
+    <?php
+    return ob_get_clean();
+}
 
     public function render_employee_monthly_view_shortcode($atts = [], $content = null, string $shortcode_tag = ''): string
     {
@@ -729,6 +766,8 @@ class CRM_OMD_Time_Manager
         echo '<tr class="summary-row"><td>Wynik</td><td>' . esc_html(number_format($reported_hours - (float) $expected_hours, 2, ',', ' ')) . '</td></tr>';
         echo '</tbody></table>';
 
+		
+		echo '<h2>Podsumowanie prac – lista</h2>';
         echo '<div id="crm-omd-monthly-table-container">';
         echo $this->get_monthly_table_html($user_id, $month);
         echo '</div>';
@@ -774,7 +813,7 @@ class CRM_OMD_Time_Manager
         $statuses = $this->get_project_statuses();
 
         ob_start();
-        echo '<h3>Projekty</h3>';
+        echo '<h2>Projekty</h2>';
 
         if (isset($_GET['project_updated']) && $_GET['project_updated'] === '1') {
             echo '<p class="crm-omd-project-alert">Projekt został zaktualizowany.</p>';
