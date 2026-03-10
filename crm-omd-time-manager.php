@@ -166,7 +166,6 @@ class CRM_OMD_Time_Manager
 
     private function get_manageable_project_ids_for_user(int $user_id): array
     {
-        $this->ensure_project_workers_table_exists();
         if (user_can($user_id, 'manage_options')) {
             $all_ids = $this->wpdb->get_col("SELECT id FROM {$this->tbl_projects} WHERE is_active = 1");
             return array_map('intval', $all_ids);
@@ -182,7 +181,6 @@ class CRM_OMD_Time_Manager
 
     private function get_project_worker_ids(int $project_id): array
     {
-        $this->ensure_project_workers_table_exists();
         if ($project_id <= 0) {
             return [];
         }
