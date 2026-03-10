@@ -170,7 +170,6 @@ class CRM_OMD_Time_Manager
 
     private function get_manageable_project_ids_for_user(int $user_id): array
     {
-        $this->ensure_project_workers_table_exists();
         if (user_can($user_id, 'manage_options')) {
             $all_ids = $this->wpdb->get_col("SELECT id FROM {$this->tbl_projects} WHERE is_active = 1");
             return array_map('intval', $all_ids);
@@ -186,7 +185,6 @@ class CRM_OMD_Time_Manager
 
     private function get_project_worker_ids(int $project_id): array
     {
-        $this->ensure_project_workers_table_exists();
         if ($project_id <= 0) {
             return [];
         }
@@ -210,18 +208,6 @@ class CRM_OMD_Time_Manager
         }
 
         return in_array($project_id, $this->get_manageable_project_ids_for_user($user_id), true);
-    }
-
-    private function get_project_cost_rows(int $project_id): array
-    {
-        if ($project_id <= 0) {
-            return [];
-        }
-
-        return $this->wpdb->get_results($this->wpdb->prepare(
-            "SELECT id, project_id, description, cost_value, created_by, created_at FROM {$this->tbl_project_costs} WHERE project_id = %d ORDER BY id DESC",
-            $project_id
-        ));
     }
 
     public function ensure_roles(): void
@@ -984,8 +970,6 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                     echo '</select>';
                     echo '<button type="submit">Zapisz status</button>';
                     echo '</form>';
-                    echo '</div>';
-                    echo '</div>';
 
                     echo '<button type="button" class="crm-omd-open-cost-modal" data-modal-target="crm-omd-cost-modal-' . $project_id . '">Dodaj koszt</button>';
                     echo '<div id="crm-omd-cost-modal-' . $project_id . '" class="crm-omd-modal" aria-hidden="true">';
@@ -1004,41 +988,6 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                     echo '<button type="submit">Zapisz koszt</button>';
                     echo '</form>';
                     echo '</div>';
-                    echo '</div>';
-
-                    echo '<div class="crm-omd-project-cost-list">';
-                    echo '<h4>Koszty projektu</h4>';
-                    if (empty($project_cost_rows)) {
-                        echo '<p>Brak kosztów dla projektu.</p>';
-                    } else {
-                        echo '<table class="entries-table"><thead><tr><th>Dane kosztu</th><th>Akcje</th></tr></thead><tbody>';
-                        foreach ($project_cost_rows as $cost_row) {
-                            $cost_id = (int) $cost_row->id;
-                            echo '<tr>';
-                            echo '<td>';
-                            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--cost-inline">';
-                            wp_nonce_field('crm_omd_update_project_cost_front_' . $cost_id);
-                            echo '<input type="hidden" name="action" value="crm_omd_update_project_cost_front">';
-                            echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
-                            echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
-                            echo '<input type="text" name="cost_description" maxlength="191" value="' . esc_attr((string) $cost_row->description) . '" required>';
-                            echo '<input type="number" name="cost_value" step="0.01" min="0" value="' . esc_attr(number_format((float) $cost_row->cost_value, 2, '.', '')) . '" required>';
-                            echo '<button type="submit">Zapisz</button>';
-                            echo '</form>';
-                            echo '</td>';
-                            echo '<td>';
-                            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="crm-omd-project-actions crm-omd-project-actions--cost-delete" onsubmit="return confirm(\'Usunąć koszt projektu?\');">';
-                            wp_nonce_field('crm_omd_delete_project_cost_front_' . $cost_id);
-                            echo '<input type="hidden" name="action" value="crm_omd_delete_project_cost_front">';
-                            echo '<input type="hidden" name="project_id" value="' . $project_id . '">';
-                            echo '<input type="hidden" name="cost_id" value="' . $cost_id . '">';
-                            echo '<button type="submit" class="secondary">Usuń</button>';
-                            echo '</form>';
-                            echo '</td>';
-                            echo '</tr>';
-                        }
-                        echo '</tbody></table>';
-                    }
                     echo '</div>';
                     echo '</td></tr>';
                 }
@@ -2620,7 +2569,7 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                 </div>
                 <div class="form-field">
                     <label for="assigned_workers">Przypisani pracownicy</label>
-                    <select name="assigned_workers[]" id="assigned_workers" class="crm-omd-full-width-field" multiple size="8">
+                    <select name="assigned_workers[]" id="assigned_workers" multiple size="8">
                         <?php foreach ($assignable_workers as $worker): ?>
                             <option value="<?php echo (int) $worker->ID; ?>" <?php selected(in_array((int) $worker->ID, $project_worker_ids, true), true); ?>>
                                 <?php echo esc_html($worker->display_name . ' (' . $worker->user_email . ')'); ?>
