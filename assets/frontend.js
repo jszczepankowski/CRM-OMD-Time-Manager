@@ -4,7 +4,7 @@
     $(document).ready(function() {
         initDependentSelects();
         initAjaxFormSubmit();
-        initProjectCostModal();
+        initProjectModals();
     });
 
     function initDependentSelects() {
@@ -117,18 +117,16 @@
     }
 
 
-    function initProjectCostModal() {
+    function initProjectModals() {
         var $modals = $('.crm-omd-modal');
         if (!$modals.length) return;
 
+        $(document).on('click', '.crm-omd-open-status-modal', function() {
+            openModalByTrigger($(this));
+        });
+
         $(document).on('click', '.crm-omd-open-cost-modal', function() {
-            var modalId = $(this).data('modal-target');
-            if (!modalId) return;
-
-            var $modal = $('#' + modalId);
-            if (!$modal.length) return;
-
-            $modal.addClass('is-open').attr('aria-hidden', 'false');
+            openModalByTrigger($(this));
         });
 
         $(document).on('click', '[data-close-modal="1"]', function() {
@@ -140,6 +138,16 @@
                 $('.crm-omd-modal.is-open').removeClass('is-open').attr('aria-hidden', 'true');
             }
         });
+    }
+
+    function openModalByTrigger($trigger) {
+        var modalId = $trigger.data('modal-target');
+        if (!modalId) return;
+
+        var $modal = $('#' + modalId);
+        if (!$modal.length) return;
+
+        $modal.addClass('is-open').attr('aria-hidden', 'false');
     }
 
     function refreshMonthlyTable() {

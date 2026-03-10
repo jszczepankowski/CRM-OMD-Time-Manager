@@ -145,3 +145,7 @@
     width: 100%;
     min-width: 100%;
 }
+
+.crm-omd-assigned-workers {
+    width: 80% !important;
+}
