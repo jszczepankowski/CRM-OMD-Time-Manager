@@ -122,13 +122,6 @@
         if (!$modals.length) return;
 
         $(document).on('click', '.crm-omd-open-cost-modal, .crm-omd-open-status-modal', function() {
-            var modalId = $(this).data('modal-target');
-            if (!modalId) return;
-
-            var $modal = $('#' + modalId);
-            if (!$modal.length) return;
-
-        $(document).on('click', '.crm-omd-open-cost-modal', function() {
             openModalByTrigger($(this));
         });
 
