@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CRM OMD Time Manager
  * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV. Pracownicy mogą edytować swoje oczekujące wpisy.
- * Version: 0.17.0
+ * Version: 0.17.1
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -308,7 +308,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.17.0'
+                '0.17.1'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
@@ -326,7 +326,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.17.0',
+                '0.17.1',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -343,7 +343,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.17.0'
+                '0.17.1'
             );
             wp_enqueue_style('crm-omd-admin');
         }
