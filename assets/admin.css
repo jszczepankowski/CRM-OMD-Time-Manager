@@ -139,3 +139,9 @@
     background: #f1f1f1;
     font-weight: 600;
 }
+
+.crm-omd-full-width-field {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 100%;
+}
