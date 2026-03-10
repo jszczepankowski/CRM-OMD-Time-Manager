@@ -990,6 +990,8 @@ private function get_daily_summary_html(int $user_id, string $month): string {
                     echo '</select>';
                     echo '<button type="submit">Zapisz status</button>';
                     echo '</form>';
+                    echo '</div>';
+                    echo '</div>';
 
                     echo '<button type="button" class="crm-omd-open-cost-modal" data-modal-target="crm-omd-cost-modal-' . $project_id . '">Dodaj koszt</button>';
                     echo '<div id="crm-omd-cost-modal-' . $project_id . '" class="crm-omd-modal" aria-hidden="true">';
