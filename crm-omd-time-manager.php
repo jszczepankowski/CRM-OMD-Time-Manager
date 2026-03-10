@@ -2455,7 +2455,7 @@ class CRM_OMD_Time_Manager
                     $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
                     $cost = $reported * $hourly_rate; // uproszczenie – tylko godziny
                     $profit_net = $revenue - $cost;
-                    $hours_to_work = (float) $admin_expected_hours;
+                    $hours_to_work = max(0, $admin_expected_hours - $approved_off);
                 ?>
                 <tr>
                     <td><?php echo esc_html($user->display_name); ?></td>
