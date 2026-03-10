@@ -1,0 +1,142 @@
+/* ============================================
+   CRM OMD Time Manager – Style dla panelu admina
+   Kolorystyka: #ddb178 (akcent)
+   ============================================ */
+
+/* Karty */
+.crm-omd-admin-card {
+    background: #fff;
+    border: 1px solid #e2e4e7;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.crm-omd-admin-card h2 {
+    margin-top: 0;
+    font-size: 1.3em;
+    border-bottom: 2px solid #ddb178;
+    padding-bottom: 8px;
+    margin-bottom: 20px;
+}
+
+/* Siatki formularzy */
+.crm-omd-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.crm-omd-form-grid .form-field {
+    margin: 0;
+}
+
+.crm-omd-form-grid label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 5px;
+    color: #23282d;
+}
+
+.crm-omd-form-grid input[type="text"],
+.crm-omd-form-grid input[type="email"],
+.crm-omd-form-grid input[type="number"],
+.crm-omd-form-grid input[type="date"],
+.crm-omd-form-grid select,
+.crm-omd-form-grid textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    transition: border-color 0.2s;
+}
+
+.crm-omd-form-grid input:focus,
+.crm-omd-form-grid select:focus,
+.crm-omd-form-grid textarea:focus {
+    border-color: #ddb178;
+    box-shadow: 0 0 0 1px #ddb178;
+    outline: none;
+}
+
+/* Przyciski z akcentem */
+.crm-omd-admin-card .button-primary,
+.crm-omd-admin-card .button.crm-omd-button-accent {
+    background: #ddb178;
+    border-color: #c9a067 #b58b54 #b58b54;
+    color: #212123;
+    text-shadow: none;
+    box-shadow: 0 1px 0 #b58b54;
+    font-weight: 600;
+}
+
+.crm-omd-admin-card .button-primary:hover,
+.crm-omd-admin-card .button.crm-omd-button-accent:hover {
+    background: #d0a46c;
+    border-color: #b58b54;
+    color: #212123;
+}
+
+/* Tabela z lepszym formatowaniem */
+.crm-omd-table {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.crm-omd-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    padding: 12px 10px;
+}
+
+.crm-omd-table td {
+    vertical-align: middle;
+    padding: 10px;
+}
+
+.crm-omd-table tr.client-group-header td {
+    background-color: #f1f1f1;
+    font-weight: bold;
+    padding: 10px;
+}
+
+/* Pasek filtrów */
+.crm-omd-filters-bar {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
+    border: 1px solid #e2e4e7;
+}
+
+.crm-omd-filters-bar select,
+.crm-omd-filters-bar input {
+    min-width: 180px;
+}
+
+/* Widok pracowników – kafelki z ustawieniami */
+.crm-omd-workers-settings table {
+    margin-top: 0;
+}
+
+.crm-omd-workers-settings .crm-omd-admin-card:first-of-type {
+    margin-top: 0;
+}
+
+/* Podsumowanie pracowników – dodatkowe style */
+.crm-omd-summary-table th {
+    background: #ddb178;
+    color: #212123;
+}
+
+.crm-omd-summary-table tfoot tr {
+    background: #f1f1f1;
+    font-weight: 600;
+}
+

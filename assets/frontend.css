@@ -1,0 +1,407 @@
+/* ==========================================
+   CRM OMD Time Manager – Style frontendowe
+   Kolorystyka: #ffffff, #212123, #ddb178
+   Wersja ujednolicona – poprawa czytelności
+   ========================================== */
+
+body {
+  font-size: 14px !important;
+}
+
+*:disabled {
+  color: #cecece;
+  opacity: 1;
+}
+
+/* Reset / podstawy */
+.crm-omd-frontend * {
+    box-sizing: border-box;
+}
+
+.crm-omd-frontend {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    font-family: "Roboto", sans-serif;
+    color: #212123;
+    background: #ffffff;
+    line-height: 1.5;
+}
+
+/* Karty / kontenery */
+.crm-omd-frontend .crm-omd-employee-portal,
+.crm-omd-frontend .crm-omd-employee-monthly-view,
+.crm-omd-frontend .crm-omd-login-panel {
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border: 1px solid #eee;
+}
+
+/* Nagłówki */
+.crm-omd-frontend h2 {
+    font-size: 1.8rem;
+    color: #212123;
+    margin-top: 0;
+    margin-bottom: 1rem;
+    border-bottom: 3px solid #ddb178;
+    padding-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.crm-omd-frontend h3 {
+    font-size: 1.4rem;
+    color: #212123;
+    margin: 1.5rem 0 1rem;
+    font-weight: 500;
+}
+
+.crm-omd-frontend h4 {
+    font-size: 1.2rem;
+    color: #212123;
+    margin: 1rem 0;
+    font-weight: 500;
+}
+
+/* Formularze */
+.crm-omd-frontend form {
+    margin: 1.5em 0;
+}
+
+.crm-omd-frontend label {
+    display: block;
+    margin-bottom: 0.3em;
+    font-weight: 600;
+    color: #212123;
+    font-size: 12px;
+}
+
+/* Ujednolicone style pól formularza */
+.crm-omd-frontend input[type="text"],
+.crm-omd-frontend input[type="email"],
+.crm-omd-frontend input[type="password"],
+.crm-omd-frontend input[type="number"],
+.crm-omd-frontend input[type="date"],
+.crm-omd-frontend input[type="month"],
+.crm-omd-frontend select,
+.crm-omd-frontend textarea {
+    width: 100%;
+    padding: 0.6em 0.8em;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 300;
+    background: #ffffff;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s;
+    line-height: 1.4;
+    height: auto; /* zapewnia naturalną wysokość */
+    min-height: 34px; /* ujednolica minimalną wysokość */
+}
+
+.crm-omd-frontend textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.crm-omd-frontend input:focus,
+.crm-omd-frontend select:focus,
+.crm-omd-frontend textarea:focus {
+    border-color: #ddb178;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(221, 177, 120, 0.2);
+}
+
+/* Przyciski */
+.crm-omd-frontend button,
+.crm-omd-frontend .button {
+    background: #ddb178;
+    color: #212123;
+    border: none;
+    padding: 0.6em 1.5em;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.1s, box-shadow 0.2s;
+    display: inline-block;
+    text-decoration: none;
+    border: 1px solid transparent;
+    line-height: 1.4;
+    min-height: 34px;
+	min-width: 100%;
+}
+
+.crm-omd-frontend button:hover,
+.crm-omd-frontend .button:hover {
+    background: #c9a067;
+    transform: scale(1.02);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.crm-omd-frontend button.secondary,
+.crm-omd-frontend .button.secondary {
+    background: #f0f0f0;
+    color: #212123;
+    border: 1px solid #ccc;
+}
+
+.crm-omd-frontend button.secondary:hover,
+.crm-omd-frontend .button.secondary:hover {
+    background: #e2e2e2;
+}
+
+/* Tabele */
+.crm-omd-frontend table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2em 0;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.crm-omd-frontend th {
+    background: #ddb178;
+    color: #212123;
+    font-weight: 600;
+    text-align: left;
+    padding: 0.8em 1em;
+    font-size: 12px;
+}
+
+.crm-omd-frontend td {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid #eee;
+    font-size: 12px;
+}
+
+.crm-omd-frontend tr:last-child td {
+    border-bottom: none;
+}
+
+.crm-omd-frontend tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+.crm-omd-frontend tfoot tr {
+    background: #f0f0f0;
+    font-weight: 600;
+}
+
+/* Panel logowania */
+.crm-omd-login-panel {
+    max-width: 460px;
+    margin: 2em auto;
+    padding: 2em;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+}
+
+.crm-omd-login-panel h3 {
+    margin-top: 0;
+    text-align: center;
+    color: #212123;
+    font-weight: 500;
+    font-size: 1.4rem;
+}
+
+.crm-omd-login-panel .crm-omd-logo-placeholder {
+    text-align: center;
+    margin-bottom: 1.5em;
+    padding: 1.5em;
+    border: 1px dashed #ddb178;
+    border-radius: 8px;
+    color: #ddb178;
+}
+
+/* Formularz trackera – układ grid */
+.crm-omd-tracker-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    background: #f9f9f9;
+    padding: 2rem;
+    border-radius: 12px;
+    margin: 1.5rem 0;
+    border: 1px solid #eee;
+}
+
+.crm-omd-tracker-form p {
+    margin: 0;
+}
+
+.crm-omd-tracker-form button[type="submit"] {
+    grid-column: 1 / -1;
+    justify-self: start;
+    background: #ddb178;
+    padding: 0.6em 2em;
+    font-size: 12px;
+}
+
+.crm-omd-tracker-form button[type="submit"]:hover {
+    background: #c9a067;
+}
+
+/* Widok miesięczny – dodatkowe akcenty */
+.crm-omd-employee-monthly-view .summary-table {
+    width: 100%;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    margin: 1.5rem 0;
+}
+
+.crm-omd-employee-monthly-view .summary-table th,
+.crm-omd-employee-monthly-view .summary-table td {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid #eee;
+}
+
+.crm-omd-employee-monthly-view .summary-table th {
+    background: #ddb178;
+    color: #212123;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.crm-omd-employee-monthly-view .summary-table tr:last-child td {
+    border-bottom: none;
+}
+
+.crm-omd-employee-monthly-view .summary-table td:first-child {
+    font-weight: 600;
+}
+
+.crm-omd-employee-monthly-view .summary-row td {
+    background: #fff3e0;
+    font-weight: 600;
+}
+
+/* Formularz wyboru miesiąca */
+.crm-omd-employee-monthly-view form {
+    background: #f9f9f9;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid #eee;
+}
+
+.crm-omd-employee-monthly-view form label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: #212123;
+    font-size: 12px;
+    margin-bottom: 0;
+}
+
+.crm-omd-employee-monthly-view form select {
+    padding: 0.5em;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: white;
+    font-size: 12px;
+    min-height: 34px;
+}
+
+.crm-omd-employee-monthly-view form button {
+    background: #ddb178;
+    color: #212123;
+    border: none;
+    padding: 0.5em 1.5em;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    min-height: 34px;
+}
+
+.crm-omd-employee-monthly-view form button:hover {
+    background: #c9a067;
+}
+
+/* Tabela wpisów (entries) */
+.entries-table th {
+    background: #ddb178;
+    color: #212123;
+    font-weight: 600;
+    padding: 0.8em 1em;
+    font-size: 12px;
+}
+
+.entries-table td {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid #eee;
+    font-size: 12px;
+}
+
+.entries-table tbody tr:hover {
+    background: rgba(221, 177, 120, 0.05);
+}
+
+/* Statusy – kolory (opcjonalnie) */
+.entries-table td:nth-child(6):contains("Oczekuje") {
+    color: #e67e22; /* pomarańcz */
+}
+.entries-table td:nth-child(6):contains("Zaakceptowane") {
+    color: #27ae60; /* zielony */
+}
+.entries-table td:nth-child(6):contains("Odrzucone") {
+    color: #e74c3c; /* czerwony */
+}
+
+/* Separator */
+hr {
+    border: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #ddb178, transparent);
+    margin: 2rem 0;
+}
+
+/* Placeholder */
+input::placeholder,
+textarea::placeholder {
+    color: #aaa;
+    font-style: italic;
+    font-size: 12px;
+}
+
+/* Responsywność */
+@media (max-width: 600px) {
+    .crm-omd-frontend {
+        padding: 0 0.5rem;
+    }
+    
+    .crm-omd-frontend th,
+    .crm-omd-frontend td {
+        padding: 0.5em;
+        font-size: 11px;
+    }
+    
+    .crm-omd-frontend button,
+    .crm-omd-frontend .button {
+        width: 100%;
+        margin-bottom: 0.5em;
+    }
+    
+    .crm-omd-tracker-form {
+        grid-template-columns: 1fr;
+        padding: 1rem;
+    }
+    
+    .crm-omd-employee-monthly-view form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
