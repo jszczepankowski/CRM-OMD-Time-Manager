@@ -30,6 +30,11 @@ class CRM_OMD_Time_Manager
     const PROJECT_STATUS_TO_INVOICE = 'to_invoice';
     const PROJECT_STATUS_SETTLED = 'settled';
 
+    const ROLE_EMPLOYEE = 'crm_pracownik';
+    const ROLE_MANAGER = 'crm_manager';
+    const ROLE_LEGACY_EMPLOYEE = 'time_tracker_employee';
+    const ROLE_LEGACY_MANAGER = 'time_tracker_manger';
+
     public function __construct()
     {
         global $wpdb;
@@ -44,6 +49,7 @@ class CRM_OMD_Time_Manager
         register_deactivation_hook(__FILE__, [$this, 'deactivate']);
 
         add_action('admin_menu', [$this, 'register_admin_menu']);
+        add_action('init', [$this, 'ensure_roles']);
 
         add_action('admin_post_crm_omd_save_client', [$this, 'handle_save_client']);
         add_action('admin_post_crm_omd_delete_client', [$this, 'handle_delete_client']);
@@ -151,7 +157,55 @@ class CRM_OMD_Time_Manager
             return false;
         }
 
-        return in_array('time_tracker_manger', (array) $user->roles, true) || user_can($user, 'manage_options');
+        return in_array(self::ROLE_MANAGER, (array) $user->roles, true)
+            || in_array(self::ROLE_LEGACY_MANAGER, (array) $user->roles, true)
+            || user_can($user, 'manage_options');
+    }
+
+    public function ensure_roles(): void
+    {
+        $employee_role = get_role(self::ROLE_EMPLOYEE);
+        if (!$employee_role) {
+            $employee_role = get_role(self::ROLE_LEGACY_EMPLOYEE);
+        }
+        if (!$employee_role) {
+            $employee_role = get_role('subscriber');
+        }
+
+        $caps = ['read' => true];
+        if ($employee_role) {
+            $caps = $employee_role->capabilities;
+        }
+
+        add_role(self::ROLE_EMPLOYEE, 'CRM_pracownik', $caps);
+        add_role(self::ROLE_MANAGER, 'CRM_manager', $caps);
+
+        $this->migrate_legacy_role(self::ROLE_LEGACY_EMPLOYEE, self::ROLE_EMPLOYEE);
+        $this->migrate_legacy_role(self::ROLE_LEGACY_MANAGER, self::ROLE_MANAGER);
+    }
+
+    private function migrate_legacy_role(string $from_role, string $to_role): void
+    {
+        $legacy_users = get_users([
+            'role' => $from_role,
+            'fields' => 'ID',
+        ]);
+
+        foreach ($legacy_users as $legacy_user_id) {
+            $user = get_user_by('id', (int) $legacy_user_id);
+            if (!$user) {
+                continue;
+            }
+
+            if (!in_array($to_role, (array) $user->roles, true)) {
+                $user->add_role($to_role);
+            }
+            $user->remove_role($from_role);
+        }
+
+        if (get_role($from_role)) {
+            remove_role($from_role);
+        }
     }
 
     private function get_month_options(string $selected = ''): string {
@@ -315,15 +369,7 @@ class CRM_OMD_Time_Manager
             KEY work_date (work_date)
         ) $charset;");
 
-        $employee_role = get_role('time_tracker_employee');
-        if (!$employee_role) {
-            $employee_role = get_role('subscriber');
-        }
-        $caps = ['read' => true];
-        if ($employee_role) {
-            $caps = $employee_role->capabilities;
-        }
-        add_role('time_tracker_manger', 'Time Tracker Manager', $caps);
+        $this->ensure_roles();
 
         if (!wp_next_scheduled('crm_omd_daily_reminder')) {
             wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', 'crm_omd_daily_reminder');
@@ -634,8 +680,13 @@ class CRM_OMD_Time_Manager
         $working_days = $this->get_working_days_in_month($year, $month_num);
         $expected_hours = $working_days * 8;
 
+        $can_manage_projects = $this->user_can_manage_front_projects($user_id);
+
         $active_tab = isset($_GET['crm_omd_tab']) ? sanitize_key((string) $_GET['crm_omd_tab']) : 'timesheet';
         if (!in_array($active_tab, ['timesheet', 'projects'], true)) {
+            $active_tab = 'timesheet';
+        }
+        if ($active_tab === 'projects' && !$can_manage_projects) {
             $active_tab = 'timesheet';
         }
 
@@ -643,7 +694,9 @@ class CRM_OMD_Time_Manager
         echo '<div class="crm-omd-frontend crm-omd-employee-monthly-view">';
         echo '<div class="crm-omd-tabs">';
         echo '<a class="crm-omd-tab ' . ($active_tab === 'timesheet' ? 'is-active' : '') . '" href="' . esc_url(add_query_arg('crm_omd_tab', 'timesheet')) . '">Ewidencja czasu</a>';
-        echo '<a class="crm-omd-tab ' . ($active_tab === 'projects' ? 'is-active' : '') . '" href="' . esc_url(add_query_arg('crm_omd_tab', 'projects')) . '">Projekty</a>';
+        if ($can_manage_projects) {
+            echo '<a class="crm-omd-tab ' . ($active_tab === 'projects' ? 'is-active' : '') . '" href="' . esc_url(add_query_arg('crm_omd_tab', 'projects')) . '">Projekty</a>';
+        }
         echo '</div>';
 
         if ($active_tab === 'projects') {
@@ -696,6 +749,10 @@ class CRM_OMD_Time_Manager
 
         $user_id = get_current_user_id();
         $can_manage = $this->user_can_manage_front_projects($user_id);
+
+        if (!$can_manage) {
+            return '<p>Dostęp do projektów mają tylko role CRM_manager i administrator.</p>';
+        }
 
         $projects = $this->wpdb->get_results(
             "SELECT p.id, p.name, p.budget, p.project_status, c.name AS client_name,
@@ -3197,7 +3254,7 @@ class CRM_OMD_Time_Manager
             }
         }
 
-        $users = get_users(['role__in' => ['subscriber', 'author', 'editor', 'administrator', 'time_tracker_manger']]);
+        $users = get_users(['role__in' => ['subscriber', 'author', 'editor', 'administrator', self::ROLE_EMPLOYEE, self::ROLE_MANAGER, self::ROLE_LEGACY_EMPLOYEE, self::ROLE_LEGACY_MANAGER]]);
 
         foreach ($users as $user) {
             $enabled = get_user_meta($user->ID, 'crm_omd_worker_enabled', true);
