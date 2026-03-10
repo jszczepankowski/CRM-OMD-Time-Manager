@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: CRM OMD Time Manager
- * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV.
- * Version: 0.13.0
+ * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV. Pracownicy mogą edytować swoje oczekujące wpisy.
+ * Version: 0.15.3
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -57,7 +57,8 @@ class CRM_OMD_Time_Manager
         add_shortcode('crm_omd_time_tracker', [$this, 'render_tracker_shortcode']);
         add_shortcode('crm_omd_employee_login', [$this, 'render_employee_login_shortcode']);
         add_shortcode('crm_omd_employee_monthly_view', [$this, 'render_employee_monthly_view_shortcode']);
-        add_shortcode('crm_omd_employee_portal', [$this, 'render_employee_portal_shortcode']);
+        // Zarejestruj akcję dla edycji wpisu
+        add_action('admin_post_crm_omd_edit_entry', [$this, 'handle_edit_entry']);
         add_action('admin_post_crm_omd_submit_entry', [$this, 'handle_submit_entry']);
         add_action('crm_omd_daily_reminder', [$this, 'send_daily_reminders']);
         add_action('wp_login', [$this, 'track_user_login'], 10, 2);
@@ -77,10 +78,7 @@ class CRM_OMD_Time_Manager
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_styles']);
     }
 
-    // ========== NOWA METODA POMOCNICZA ==========
-    /**
-     * Dodaje kolumnę do tabeli, jeśli nie istnieje.
-     */
+    // ========== METODY POMOCNICZE ==========
     private function maybe_add_column(string $table, string $column, string $definition): void
     {
         $row = $this->wpdb->get_results($this->wpdb->prepare(
@@ -91,11 +89,7 @@ class CRM_OMD_Time_Manager
             $this->wpdb->query("ALTER TABLE {$table} ADD COLUMN {$column} {$definition}");
         }
     }
-    // =============================================
 
-    /**
-     * Zwraca przetłumaczoną nazwę statusu.
-     */
     private function get_status_label(string $status): string
     {
         $labels = [
@@ -107,9 +101,6 @@ class CRM_OMD_Time_Manager
         return $labels[$status] ?? $status;
     }
 
-    /**
-     * Zwraca listę dostępnych statusów (do wyboru w formularzach).
-     */
     private function get_available_statuses(bool $include_off = true): array
     {
         $statuses = [
@@ -123,10 +114,6 @@ class CRM_OMD_Time_Manager
         return $statuses;
     }
 
-    /**
-     * Generuje listę miesięcy w formacie YYYY-MM od pierwszego wpisu w bazie do bieżącego.
-     * Używa date_i18n do polskich nazw miesięcy.
-     */
     private function get_month_options(string $selected = ''): string {
         $min_date = $this->wpdb->get_var("SELECT MIN(work_date) FROM {$this->tbl_entries}");
         if (!$min_date) {
@@ -146,44 +133,36 @@ class CRM_OMD_Time_Manager
         return $options;
     }
 
-    /**
-     * Rejestruje i ładuje arkusz stylów dla frontendu.
-     */
     public function enqueue_frontend_styles(): void
     {
         global $post;
         if (is_a($post, 'WP_Post') && (
             has_shortcode($post->post_content, 'crm_omd_time_tracker') ||
             has_shortcode($post->post_content, 'crm_omd_employee_login') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_portal')
+            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view')
         )) {
             wp_register_style(
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.13.0'
+                '0.15.3'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
     }
 
-    /**
-     * Rejestruje i ładuje skrypt JavaScript dla frontendu.
-     */
     public function enqueue_frontend_scripts(): void
     {
         global $post;
         if (is_a($post, 'WP_Post') && (
             has_shortcode($post->post_content, 'crm_omd_time_tracker') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view') ||
-            has_shortcode($post->post_content, 'crm_omd_employee_portal')
+            has_shortcode($post->post_content, 'crm_omd_employee_monthly_view')
         )) {
             wp_enqueue_script(
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.13.0',
+                '0.15.3',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -193,9 +172,6 @@ class CRM_OMD_Time_Manager
         }
     }
 
-    /**
-     * Rejestruje i ładuje arkusz stylów dla panelu admina.
-     */
     public function enqueue_admin_styles($hook): void
     {
         if (strpos($hook, 'crm-omd') !== false) {
@@ -203,7 +179,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.13.0'
+                '0.15.3'
             );
             wp_enqueue_style('crm-omd-admin');
         }
@@ -214,7 +190,7 @@ class CRM_OMD_Time_Manager
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $charset = $this->wpdb->get_charset_collate();
 
-        // Tabela klientów – definicja bez nowych kolumn (dbDelta nie doda ich do istniejącej tabeli)
+        // Tabela klientów
         dbDelta("CREATE TABLE {$this->tbl_clients} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             name VARCHAR(191) NOT NULL,
@@ -227,14 +203,13 @@ class CRM_OMD_Time_Manager
             PRIMARY KEY  (id)
         ) $charset;");
 
-        // NOWE: dodanie kolumn adresowych i pełnej nazwy, jeśli nie istnieją
         $this->maybe_add_column($this->tbl_clients, 'full_name', "VARCHAR(191) NULL AFTER name");
         $this->maybe_add_column($this->tbl_clients, 'street', "VARCHAR(191) NULL");
         $this->maybe_add_column($this->tbl_clients, 'building_number', "VARCHAR(20) NULL");
         $this->maybe_add_column($this->tbl_clients, 'postcode', "VARCHAR(10) NULL");
         $this->maybe_add_column($this->tbl_clients, 'city', "VARCHAR(100) NULL");
 
-        // Tabela projektów z budżetem
+        // Tabela projektów
         dbDelta("CREATE TABLE {$this->tbl_projects} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             client_id BIGINT UNSIGNED NOT NULL,
@@ -246,9 +221,9 @@ class CRM_OMD_Time_Manager
             PRIMARY KEY  (id),
             KEY client_id (client_id)
         ) $charset;");
-        // Dodanie kolumny budżetu, jeśli nie istnieje (na wypadek aktualizacji)
         $this->maybe_add_column($this->tbl_projects, 'budget', "DECIMAL(10,2) NOT NULL DEFAULT 0");
 
+        // Tabela usług
         dbDelta("CREATE TABLE {$this->tbl_services} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             client_id BIGINT UNSIGNED NOT NULL,
@@ -262,6 +237,7 @@ class CRM_OMD_Time_Manager
             KEY client_id (client_id)
         ) $charset;");
 
+        // Tabela wpisów
         dbDelta("CREATE TABLE {$this->tbl_entries} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             user_id BIGINT UNSIGNED NOT NULL,
@@ -351,10 +327,6 @@ class CRM_OMD_Time_Manager
             return '<p class="crm-omd-frontend">Jesteś już zalogowany.</p>';
         }
 
-        if (!is_array($atts)) {
-            $atts = [];
-        }
-
         $atts = shortcode_atts([
             'logo_url' => 'https://maincloud.pl/crm/wp-content/uploads/2026/03/jelen.png',
             'title' => 'Panel logowania pracownika',
@@ -435,10 +407,6 @@ class CRM_OMD_Time_Manager
         return (float) $sum;
     }
 
-    /**
-     * Zwraca sumę wartości (calculated_value) zaakceptowanych wpisów użytkownika w podanym zakresie dat.
-     * Uwzględnia tylko status 'approved' (bez 'approved_off').
-     */
     private function get_user_revenue_for_range(int $user_id, string $date_from, string $date_to): float
     {
         $sum = $this->wpdb->get_var($this->wpdb->prepare(
@@ -453,13 +421,13 @@ class CRM_OMD_Time_Manager
     }
 
     /**
-     * Generuje HTML tabeli z wpisami dla danego użytkownika i miesiąca.
+     * Generuje HTML tabeli z wpisami.
      */
     private function get_monthly_table_html(int $user_id, string $month): string {
         [$date_from, $date_to] = $this->get_month_boundaries($month);
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
-                "SELECT e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, e.hours, e.status, e.description
+                "SELECT e.id, e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, e.hours, e.status, e.description
                 FROM {$this->tbl_entries} e
                 INNER JOIN {$this->tbl_clients} c ON c.id = e.client_id
                 INNER JOIN {$this->tbl_projects} p ON p.id = e.project_id
@@ -472,11 +440,13 @@ class CRM_OMD_Time_Manager
             )
         );
 
+        $portal_url = home_url('/panel-pracownika/');
+
         ob_start();
         echo '<table class="entries-table">';
-        echo '<thead><tr><th>Data</th><th>Klient</th><th>Projekt</th><th>Usługa</th><th>Godziny</th><th>Status</th><th>Opis</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Data</th><th>Klient</th><th>Projekt</th><th>Usługa</th><th>Godziny</th><th>Status</th><th>Opis</th><th>Akcje</th></tr></thead><tbody>';
         if (empty($rows)) {
-            echo '<tr><td colspan="7">Brak wpisów dla tego miesiąca.</td></tr>';
+            echo '<tr><td colspan="8">Brak wpisów dla tego miesiąca.</td></tr>';
         } else {
             foreach ($rows as $row) {
                 echo '<tr>';
@@ -487,9 +457,72 @@ class CRM_OMD_Time_Manager
                 echo '<td>' . esc_html(number_format((float) $row->hours, 2, ',', ' ')) . '</td>';
                 echo '<td>' . esc_html($this->get_status_label($row->status)) . '</td>';
                 echo '<td>' . esc_html($row->description) . '</td>';
+                echo '<td>';
+                if ($row->status === self::STATUS_PENDING) {
+                    $edit_url = add_query_arg('edit_entry', $row->id, $portal_url);
+                    echo '<a href="' . esc_url($edit_url) . '" class="button">Edytuj</a>';
+                } else {
+                    echo '-';
+                }
+                echo '</td>';
                 echo '</tr>';
             }
         }
+        echo '</tbody></table>';
+        return ob_get_clean();
+    }
+
+    /**
+     * Generuje tabelę z dziennym podsumowaniem godzin.
+     */
+    private function get_daily_summary_html(int $user_id, string $month): string {
+        [$date_from, $date_to] = $this->get_month_boundaries($month);
+        $results = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                "SELECT work_date, SUM(hours) as total_hours
+                FROM {$this->tbl_entries}
+                WHERE user_id = %d AND work_date BETWEEN %s AND %s
+                GROUP BY work_date
+                ORDER BY work_date ASC",
+                $user_id,
+                $date_from,
+                $date_to
+            )
+        );
+
+        $daily_totals = [];
+        foreach ($results as $row) {
+            $daily_totals[$row->work_date] = (float) $row->total_hours;
+        }
+
+        $start = new DateTime($date_from);
+        $end = new DateTime($date_to);
+        $interval = new DateInterval('P1D');
+        $period = new DatePeriod($start, $interval, $end->modify('+1 day'));
+
+        ob_start();
+        echo '<h3>Podsumowanie dzienne</h3>';
+        echo '<table class="daily-summary-table" style="margin-top: 20px; width: 100%; border-collapse: collapse;">';
+        echo '<thead><tr><th>Data</th><th>Łączna liczba godzin</th></tr></thead><tbody>';
+
+        $has_any = false;
+        foreach ($period as $date) {
+            $date_str = $date->format('Y-m-d');
+            $display_date = date_i18n('d.m.Y', $date->getTimestamp());
+            $hours = isset($daily_totals[$date_str]) ? $daily_totals[$date_str] : 0;
+            if ($hours > 0) {
+                $has_any = true;
+            }
+            echo '<tr>';
+            echo '<td>' . esc_html($display_date) . '</td>';
+            echo '<td>' . esc_html(number_format($hours, 2, ',', ' ')) . '</td>';
+            echo '</tr>';
+        }
+
+        if (!$has_any) {
+            echo '<tr><td colspan="2">Brak wpisów w tym miesiącu.</td></tr>';
+        }
+
         echo '</tbody></table>';
         return ob_get_clean();
     }
@@ -505,8 +538,24 @@ class CRM_OMD_Time_Manager
             return '<p class="crm-omd-frontend">Twoje konto jest wyłączone z raportowania czasu pracy.</p>';
         }
 
-        if (!is_array($atts)) {
-            $atts = [];
+        // Obsługa parametru edit_entry
+        if (isset($_GET['edit_entry']) && is_numeric($_GET['edit_entry'])) {
+            $entry_id = (int) $_GET['edit_entry'];
+            $entry = $this->wpdb->get_row($this->wpdb->prepare(
+                "SELECT * FROM {$this->tbl_entries} WHERE id = %d AND user_id = %d AND status = 'pending'",
+                $entry_id,
+                get_current_user_id()
+            ));
+            if ($entry) {
+                return $this->render_edit_entry_form($entry);
+            } else {
+                return '<p class="crm-omd-frontend error">Nie znaleziono wpisu do edycji lub nie masz uprawnień.</p>';
+            }
+        }
+
+        // Wyświetl komunikat sukcesu po edycji
+        if (isset($_GET['updated']) && $_GET['updated'] == '1') {
+            echo '<div class="crm-omd-frontend success" style="background-color: #d4edda; color: #155724; padding: 10px; margin-bottom: 15px; border: 1px solid #c3e6cb; border-radius: 4px;">Wpis został zaktualizowany.</div>';
         }
 
         $atts = shortcode_atts([
@@ -519,6 +568,7 @@ class CRM_OMD_Time_Manager
         $month_num = (int) substr($month, 5, 2);
         [$date_from, $date_to] = $this->get_month_boundaries($month);
 
+
         $user_id = get_current_user_id();
         $reported_hours = $this->get_user_reported_hours_for_range($user_id, $date_from, $date_to);
         $working_days = $this->get_working_days_in_month($year, $month_num);
@@ -526,7 +576,6 @@ class CRM_OMD_Time_Manager
 
         ob_start();
         echo '<div class="crm-omd-frontend crm-omd-employee-monthly-view">';
-
 
         echo '<form method="get" style="margin:1em 0;width: 35%;float: left;margin-right: 5%;">';
         foreach ($_GET as $key => $value) {
@@ -556,48 +605,135 @@ class CRM_OMD_Time_Manager
         echo $this->get_monthly_table_html($user_id, $month);
         echo '</div>';
 
+        echo '<div id="crm-omd-daily-summary-container" style="margin-top: 30px;">';
+        echo $this->get_daily_summary_html($user_id, $month);
+        echo '</div>';
+
         echo '</div>';
         return (string) ob_get_clean();
     }
 
-    public function render_employee_portal_shortcode($atts = [], $content = null, string $shortcode_tag = ''): string
-    {
-        if (!is_user_logged_in()) {
-            return '<p class="crm-omd-frontend">Musisz być zalogowany.</p>';
-        }
-
-        $allow = get_user_meta(get_current_user_id(), 'crm_omd_worker_enabled', true);
-        if ($allow === '0') {
-            return '<p class="crm-omd-frontend">Twoje konto jest wyłączone z raportowania czasu pracy.</p>';
-        }
-
-        if (!is_array($atts)) {
-            $atts = [];
-        }
-
-        $atts = shortcode_atts([
-            'month' => date('Y-m'),
-            'show_tracker' => '1',
-        ], $atts, 'crm_omd_employee_portal');
-
-        $month = preg_match('/^\d{4}-\d{2}$/', (string) $atts['month']) ? (string) $atts['month'] : date('Y-m');
+    /**
+     * Formularz edycji wpisu.
+     */
+    private function render_edit_entry_form($entry): string {
+        $clients = $this->wpdb->get_results("SELECT id, name FROM {$this->tbl_clients} WHERE is_active = 1 ORDER BY name ASC");
 
         ob_start();
-        echo '<div class="crm-omd-frontend crm-omd-employee-portal">';
-        echo '<h2>Panel pracownika</h2>';
-        echo '<p>Twoje statystyki i raportowanie godzin w jednym miejscu.</p>';
+        ?>
+        <div class="crm-omd-frontend">
+            <h3>Edycja wpisu z dnia <?php echo esc_html($entry->work_date); ?></h3>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="crm-omd-tracker-form">
+                <?php wp_nonce_field('crm_omd_edit_entry_' . $entry->id); ?>
+                <input type="hidden" name="action" value="crm_omd_edit_entry">
+                <input type="hidden" name="entry_id" value="<?php echo (int) $entry->id; ?>">
+                
+                <p><label>Data wpisu<br><input type="date" name="work_date" value="<?php echo esc_attr($entry->work_date); ?>" required></label></p>
+                
+                <p><label>Klient<br>
+                    <select name="client_id" id="edit_client_id" required>
+                        <option value="">- Wybierz klienta -</option>
+                        <?php foreach ($clients as $client): ?>
+                            <option value="<?php echo (int) $client->id; ?>" <?php selected($entry->client_id, $client->id); ?>><?php echo esc_html($client->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label></p>
+                
+                <p><label>Projekt<br>
+                    <select name="project_id" id="edit_project_id" required>
+                        <option value="">- Wybierz projekt -</option>
+                    </select>
+                </label></p>
+                
+                <p><label>lub dodaj nowy projekt<br><input type="text" name="new_project" id="edit_new_project" maxlength="191" placeholder="Nazwa nowego projektu"></label></p>
+                
+                <p><label>Usługa<br>
+                    <select name="service_id" id="edit_service_id" required>
+                        <option value="">- Wybierz usługę -</option>
+                    </select>
+                </label></p>
+                
+                <p class="crm-omd-field-hours"><label>Liczba godzin<br><input type="number" name="hours" min="0" step="0.25" value="<?php echo esc_attr((string) $entry->hours); ?>" required></label></p>
+                
+                <p class="crm-omd-field-amount" style="display:none;"><label>Kwota (PLN)<br><input type="number" name="amount" min="0" step="0.01" value="0"></label></p>
+                
+                <p><label>Opis prac<br><textarea name="description" rows="2" required><?php echo esc_textarea($entry->description); ?></textarea></label></p>
+                
+                <p>
+                    <button type="submit">Zapisz zmiany</button>
+                    <a href="<?php echo esc_url(home_url('/panel-pracownika/')); ?>" class="button">Anuluj</a>
+                </p>
+            </form>
+        </div>
 
-        $monthly_view_html = $this->render_employee_monthly_view_shortcode(['month' => $month]);
-        echo $monthly_view_html;
+        <script type="text/javascript">
+        jQuery(document).ready(function($) {
+            var $client = $('#edit_client_id');
+            var $project = $('#edit_project_id');
+            var $service = $('#edit_service_id');
+            var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+            var initialClient = $client.val();
+            var selectedProject = <?php echo (int) $entry->project_id; ?>;
+            var selectedService = <?php echo (int) $entry->service_id; ?>;
 
-        if ((string) $atts['show_tracker'] === '1') {
-            echo '<hr style="margin:2em 0; border: 1px solid #ddb178;">';
-            echo '<h3>Raportowanie godzin</h3>';
-            $tracker_html = $this->render_tracker_shortcode();
-            echo $tracker_html;
-        }
+            function loadProjects(clientId, selectedProject) {
+                $.get(ajaxurl, {
+                    action: 'crm_omd_get_projects',
+                    client_id: clientId
+                }, function(response) {
+                    if (response.success) {
+                        $project.empty().append('<option value="">Wybierz projekt</option>');
+                        $.each(response.data, function(i, project) {
+                            var option = $('<option>', { value: project.id, text: project.name });
+                            if (selectedProject && project.id == selectedProject) {
+                                option.prop('selected', true);
+                            }
+                            $project.append(option);
+                        });
+                        $project.prop('disabled', false);
+                    }
+                }).fail(function() { console.error('Błąd ładowania projektów'); });
+            }
 
-        echo '</div>';
+            function loadServices(clientId, selectedService) {
+                $.get(ajaxurl, {
+                    action: 'crm_omd_get_services',
+                    client_id: clientId
+                }, function(response) {
+                    if (response.success) {
+                        $service.empty().append('<option value="">Wybierz usługę</option>');
+                        $.each(response.data, function(i, service) {
+                            var option = $('<option>', { 
+                                value: service.id, 
+                                text: service.name + ' (' + (service.billing_type === 'fixed' ? 'ryczałt' : 'godzinowa') + ')'
+                            });
+                            if (selectedService && service.id == selectedService) {
+                                option.prop('selected', true);
+                            }
+                            $service.append(option);
+                        });
+                        $service.prop('disabled', false);
+                    }
+                }).fail(function() { console.error('Błąd ładowania usług'); });
+            }
+
+            $client.on('change', function() {
+                var clientId = $(this).val();
+                $project.empty().append('<option value="">Wybierz projekt</option>').prop('disabled', true);
+                $service.empty().append('<option value="">Wybierz usługę</option>').prop('disabled', true);
+                if (clientId) {
+                    loadProjects(clientId, 0);
+                    loadServices(clientId, 0);
+                }
+            });
+
+            if (initialClient) {
+                loadProjects(initialClient, selectedProject);
+                loadServices(initialClient, selectedService);
+            }
+        });
+        </script>
+        <?php
         return (string) ob_get_clean();
     }
 
@@ -614,6 +750,15 @@ class CRM_OMD_Time_Manager
 
         $clients = $this->wpdb->get_results("SELECT id, name FROM {$this->tbl_clients} WHERE is_active = 1 ORDER BY name ASC");
 
+        $user_id = get_current_user_id();
+        $last_date = $this->wpdb->get_var($this->wpdb->prepare(
+            "SELECT MAX(work_date) FROM {$this->tbl_entries} WHERE user_id = %d",
+            $user_id
+        ));
+        if (!$last_date) {
+            $last_date = date('Y-m-d');
+        }
+
         ob_start();
         ?>
         <div class="crm-omd-frontend">
@@ -621,7 +766,7 @@ class CRM_OMD_Time_Manager
                 <?php wp_nonce_field('crm_omd_submit_entry'); ?>
                 <input type="hidden" name="action" value="crm_omd_submit_entry">
                 
-                <p><label>Data wpisu<br><input type="date" name="work_date" value="<?php echo esc_attr(date('Y-m-d')); ?>" required></label></p>
+                <p><label>Data wpisu<br><input type="date" name="work_date" value="<?php echo esc_attr($last_date); ?>" required></label></p>
                 
                 <p><label>Klient<br>
                     <select name="client_id" required>
@@ -646,10 +791,8 @@ class CRM_OMD_Time_Manager
                     </select>
                 </label></p>
                 
-                <!-- Pole godzin (widoczne domyślnie) -->
                 <p class="crm-omd-field-hours"><label>Liczba godzin<br><input type="number" name="hours" min="0" step="0.25" value="1" required></label></p>
                 
-                <!-- Pole kwoty (ukryte domyślnie) -->
                 <p class="crm-omd-field-amount" style="display:none;"><label>Kwota (PLN)<br><input type="number" name="amount" min="0" step="0.01" value="0"></label></p>
                 
                 <p><label>Opis prac<br><textarea name="description" rows="2" required></textarea></label></p>
@@ -659,6 +802,124 @@ class CRM_OMD_Time_Manager
         </div>
         <?php
         return (string) ob_get_clean();
+    }
+
+    /**
+     * POPRAWIONA METODA: Edycja wpisu (bez duplikowania)
+     */
+    public function handle_edit_entry(): void
+    {
+        if (!is_user_logged_in()) {
+            wp_die(esc_html__('Musisz być zalogowany.', 'crm-omd-time-manager'));
+        }
+
+        $user_id = get_current_user_id();
+        $allowed = get_user_meta($user_id, 'crm_omd_worker_enabled', true);
+        if ($allowed === '0') {
+            wp_die(esc_html__('Twoje konto nie ma uprawnień do edycji wpisów.', 'crm-omd-time-manager'));
+        }
+
+        $entry_id = isset($_POST['entry_id']) ? (int) $_POST['entry_id'] : 0;
+        if (!$entry_id) {
+            wp_die(esc_html__('Nieprawidłowy wpis.', 'crm-omd-time-manager'));
+        }
+
+        check_admin_referer('crm_omd_edit_entry_' . $entry_id);
+
+        $entry = $this->wpdb->get_row($this->wpdb->prepare(
+            "SELECT * FROM {$this->tbl_entries} WHERE id = %d AND user_id = %d",
+            $entry_id,
+            $user_id
+        ));
+
+        if (!$entry) {
+            wp_die(esc_html__('Nie znaleziono wpisu lub brak uprawnień.', 'crm-omd-time-manager'));
+        }
+
+        if ($entry->status !== self::STATUS_PENDING) {
+            wp_die(esc_html__('Można edytować tylko wpisy oczekujące.', 'crm-omd-time-manager'));
+        }
+
+        $client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : 0;
+        $service_id = isset($_POST['service_id']) ? (int) $_POST['service_id'] : 0;
+        $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
+        $new_project = isset($_POST['new_project']) ? sanitize_text_field(wp_unslash($_POST['new_project'])) : '';
+        $hours = isset($_POST['hours']) ? (float) $_POST['hours'] : 0;
+        $amount = isset($_POST['amount']) ? (float) $_POST['amount'] : 0;
+        $description = isset($_POST['description']) ? sanitize_textarea_field(wp_unslash($_POST['description'])) : '';
+        $work_date = isset($_POST['work_date']) ? sanitize_text_field(wp_unslash($_POST['work_date'])) : '';
+
+        if (!$client_id || !$service_id || !$work_date || !$description) {
+            wp_die(esc_html__('Wypełnij wymagane pola.', 'crm-omd-time-manager'));
+        }
+
+        // Ustal projekt: jeśli podano istniejący projekt, używamy go; w przeciwnym razie, jeśli dodano nowy, tworzymy
+        if ($project_id > 0) {
+            // istniejący projekt – nic nie robimy
+        } elseif (!empty($new_project)) {
+            $this->wpdb->insert(
+                $this->tbl_projects,
+                [
+                    'client_id' => $client_id,
+                    'name' => $new_project,
+                    'description' => '',
+                    'budget' => 0,
+                    'is_active' => 1,
+                    'created_at' => current_time('mysql')
+                ],
+                ['%d', '%s', '%s', '%f', '%d', '%s']
+            );
+            $project_id = (int) $this->wpdb->insert_id;
+        } else {
+            wp_die(esc_html__('Wybierz lub dodaj projekt.', 'crm-omd-time-manager'));
+        }
+
+        // Sprawdź, czy usługa należy do klienta i oblicz wartość
+        $service = $this->wpdb->get_row($this->wpdb->prepare(
+            "SELECT billing_type, hourly_rate, fixed_value FROM {$this->tbl_services} WHERE id = %d AND client_id = %d",
+            $service_id,
+            $client_id
+        ));
+        if (!$service) {
+            wp_die(esc_html__('Usługa nie należy do wskazanego klienta.', 'crm-omd-time-manager'));
+        }
+
+        if ($service->billing_type === 'fixed') {
+            $hours = 0;
+            $value = $amount > 0 ? $amount : (float) $service->fixed_value;
+        } else {
+            $value = $hours * (float) $service->hourly_rate;
+        }
+
+        // Aktualizacja wpisu – używamy bezpośredniego update'u
+        $updated = $this->wpdb->update(
+            $this->tbl_entries,
+            [
+                'client_id'      => $client_id,
+                'project_id'     => $project_id,
+                'service_id'     => $service_id,
+                'work_date'      => $work_date,
+                'hours'          => $hours,
+                'description'    => $description,
+                'status'         => self::STATUS_PENDING, // reset statusu do pending
+                'calculated_value' => $value,
+                'reviewed_by'    => null,
+                'reviewed_at'    => null,
+            ],
+            ['id' => $entry_id], // warunek WHERE
+            ['%d', '%d', '%d', '%s', '%f', '%s', '%s', '%f', '%d', '%s'],
+            ['%d']
+        );
+
+        if ($updated === false) {
+            // Logowanie błędu (opcjonalnie)
+            error_log('CRM OMD: Błąd aktualizacji wpisu ID ' . $entry_id . ' - ' . $this->wpdb->last_error);
+            wp_die(esc_html__('Błąd podczas zapisu zmian. Spróbuj ponownie lub skontaktuj się z administratorem.', 'crm-omd-time-manager'));
+        }
+
+        // Przekierowanie na panel z komunikatem sukcesu
+        wp_redirect(add_query_arg('updated', '1', home_url('/panel-pracownika/')));
+        exit;
     }
 
     public function handle_submit_entry(): void
@@ -706,7 +967,6 @@ class CRM_OMD_Time_Manager
             wp_die(esc_html__('Usługa nie należy do wskazanego klienta.', 'crm-omd-time-manager'));
         }
 
-        // Dla usług ryczałtowych ustawiamy godziny na 0
         $service = $this->wpdb->get_row($this->wpdb->prepare("SELECT billing_type FROM {$this->tbl_services} WHERE id = %d", $service_id));
         if ($service && $service->billing_type === 'fixed') {
             $hours = 0;
@@ -729,7 +989,7 @@ class CRM_OMD_Time_Manager
             ['%d', '%d', '%d', '%d', '%s', '%f', '%s', '%s', '%f', '%s']
         );
 
-        wp_safe_redirect(wp_get_referer() ?: home_url('/'));
+        wp_redirect(home_url('/panel-pracownika/'));
         exit;
     }
 
@@ -948,7 +1208,6 @@ class CRM_OMD_Time_Manager
         echo '<div class="wrap">';
         echo '<h1>Wpisy godzinowe</h1>';
 
-        // Formularz dodawania/edycji w karcie
         if ($edit_entry) {
             echo '<div class="crm-omd-admin-card">';
             echo '<h2>Edycja wpisu #' . (int) $edit_entry->id . '</h2>';
@@ -1047,7 +1306,7 @@ class CRM_OMD_Time_Manager
         echo '</tbody></table>';
         echo '</div>';
 
-        // Skrypt do dynamicznego ładowania projektów/usług (AJAX)
+        // Skrypt AJAX dla formularzy admina
         ?>
         <script type="text/javascript">
         jQuery(document).ready(function($) {
@@ -1107,7 +1366,6 @@ class CRM_OMD_Time_Manager
                 }
             });
 
-            // Jeśli klient jest wybrany (edycja), ładujemy listy z zapisanymi wartościami
             var initialClient = $client.val();
             if (initialClient) {
                 loadProjects(initialClient, <?php echo (int) ($edit_entry ? $edit_entry->project_id : 0); ?>);
@@ -1120,7 +1378,6 @@ class CRM_OMD_Time_Manager
 
     /**
      * Pomocnicza funkcja do rysowania formularza wpisu (admin).
-     * Dodano pole "lub dodaj nowy projekt".
      */
     private function render_entry_form($entry, $users, $clients, array $statuses): void
     {
@@ -1161,7 +1418,6 @@ class CRM_OMD_Time_Manager
                     </select>
                 </div>
 
-                <!-- NOWE POLE: Dodaj nowy projekt -->
                 <div class="form-field">
                     <label for="new_project">lub dodaj nowy projekt</label>
                     <input type="text" name="new_project" id="new_project" maxlength="191" placeholder="Nazwa nowego projektu">
@@ -1255,7 +1511,6 @@ class CRM_OMD_Time_Manager
             wp_die(esc_html__('Niepoprawne dane formularza.', 'crm-omd-time-manager'));
         }
 
-        // Obsługa nowego projektu
         if (!$project_id && $new_project !== '') {
             $this->wpdb->insert(
                 $this->tbl_projects,
@@ -2025,7 +2280,7 @@ class CRM_OMD_Time_Manager
                         <th>Aktywny</th>
                         <th>Przypomnienia</th>
                         <th>Pensja miesięczna</th>
-                        <th>Stawka godzinowa</th> <!-- NOWA STAWKA GODZINOWA -->
+                        <th>Stawka godzinowa</th>
                         <th>Akcje</th>
                     </tr>
                 </thead>
@@ -2041,7 +2296,6 @@ class CRM_OMD_Time_Manager
                         }
                         $last_login = get_user_meta($user->ID, 'crm_omd_last_login', true);
                         $monthly_salary = (float) get_user_meta($user->ID, 'crm_omd_worker_monthly_salary', true);
-                        // NOWA STAWKA GODZINOWA
                         $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
                     ?>
                     <tr>
@@ -2066,7 +2320,7 @@ class CRM_OMD_Time_Manager
                         <td>
                             <input type="number" name="worker_monthly_salary[<?php echo (int) $user->ID; ?>]" min="0" step="0.01" value="<?php echo esc_attr(number_format($monthly_salary, 2, '.', '')); ?>" style="width:120px;">
                         </td>
-                        <td> <!-- NOWA STAWKA GODZINOWA -->
+                        <td>
                             <input type="number" name="worker_hourly_rate[<?php echo (int) $user->ID; ?>]" min="0" step="0.01" value="<?php echo esc_attr(number_format($hourly_rate, 2, '.', '')); ?>" style="width:100px;">
                         </td>
                         <td>
@@ -2146,7 +2400,6 @@ class CRM_OMD_Time_Manager
         $enabled = isset($_POST['worker_enabled']) && is_array($_POST['worker_enabled']) ? $_POST['worker_enabled'] : [];
         $reminder = isset($_POST['worker_reminder']) && is_array($_POST['worker_reminder']) ? $_POST['worker_reminder'] : [];
         $monthly_salary = isset($_POST['worker_monthly_salary']) && is_array($_POST['worker_monthly_salary']) ? $_POST['worker_monthly_salary'] : [];
-        // NOWA STAWKA GODZINOWA
         $hourly_rates = isset($_POST['worker_hourly_rate']) && is_array($_POST['worker_hourly_rate']) ? $_POST['worker_hourly_rate'] : [];
 
         foreach ($users as $id) {
@@ -2154,14 +2407,13 @@ class CRM_OMD_Time_Manager
             $is_reminder = isset($reminder[$id]) && $reminder[$id] === '1' ? '1' : '0';
             $salary_raw = isset($monthly_salary[$id]) ? (string) wp_unslash($monthly_salary[$id]) : '0';
             $salary = max(0, (float) str_replace(',', '.', $salary_raw));
-            // NOWA STAWKA GODZINOWA
             $hourly_raw = isset($hourly_rates[$id]) ? (string) wp_unslash($hourly_rates[$id]) : '0';
             $hourly = max(0, (float) str_replace(',', '.', $hourly_raw));
             
             update_user_meta($id, 'crm_omd_worker_enabled', $is_enabled);
             update_user_meta($id, 'crm_omd_worker_reminder', $is_reminder);
             update_user_meta($id, 'crm_omd_worker_monthly_salary', $salary);
-            update_user_meta($id, 'crm_omd_worker_hourly_rate', $hourly); // NOWA STAWKA GODZINOWA
+            update_user_meta($id, 'crm_omd_worker_hourly_rate', $hourly);
         }
 
         wp_safe_redirect(admin_url('admin.php?page=crm-omd-workers'));
@@ -2389,14 +2641,13 @@ class CRM_OMD_Time_Manager
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'display_name', 'order_dir' => ($order_by === 'display_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Pracownik</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'hours', 'order_dir' => ($order_by === 'hours' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Godziny</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'calculated_value', 'order_dir' => ($order_by === 'calculated_value' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Przychód</a></th>';
-            echo '<th>Koszt</th><th>Zysk</th>'; // NOWE KOLUMNY
+            echo '<th>Koszt</th><th>Zysk</th>';
             echo '<th>Opis</th>';
         } else {
             $base_url = remove_query_arg(['order_by', 'order_dir']);
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'client_name', 'order_dir' => ($order_by === 'client_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Klient</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'hours_sum', 'order_dir' => ($order_by === 'hours_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Ilość godzin (miesiąc)</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'value_sum', 'order_dir' => ($order_by === 'value_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Łączna kwota</a></th>';
-            // W widoku zagregowanym na razie nie dodajemy kosztów (można rozwinąć później)
         }
         echo '</tr></thead><tbody>';
 
@@ -2582,3 +2833,4 @@ class CRM_OMD_Time_Manager
 }
 
 new CRM_OMD_Time_Manager();
+?>
