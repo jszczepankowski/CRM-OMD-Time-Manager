@@ -2418,6 +2418,8 @@ class CRM_OMD_Time_Manager
         <?php
         echo '</div>';
 
+        
+       
         // Karta podsumowania z kosztem i zyskiem
         echo '<div class="crm-omd-admin-card">';
         echo '<h2>Podsumowanie pracowników</h2>';
@@ -2455,14 +2457,18 @@ class CRM_OMD_Time_Manager
                     $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
                     $cost = $reported * $hourly_rate; // uproszczenie – tylko godziny
                     $profit_net = $revenue - $cost;
-                    $hours_to_work = max(0, $admin_expected_hours - $approved_off);
+                    
+                    // Stałe godziny do przepracowania (pełny etat)
+                    $hours_to_work = $admin_expected_hours;
+                    // Różnica = godziny do przepracowania - zaraportowane - OFF
+                    $difference = $admin_expected_hours - $reported - $approved_off;
                 ?>
                 <tr>
                     <td><?php echo esc_html($user->display_name); ?></td>
                     <td><?php echo esc_html(number_format($reported, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($approved_off, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($hours_to_work, 2, ',', ' ')); ?></td>
-                    <td><?php echo esc_html(number_format($reported - $hours_to_work, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($difference, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($revenue, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($salary, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($cost, 2, ',', ' ')); ?></td>
