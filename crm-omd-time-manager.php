@@ -622,7 +622,7 @@ class CRM_OMD_Time_Manager
         ob_start();
         ?>
         <div class="crm-omd-frontend">
-            <h3>Edycja wpisu z dnia <?php echo esc_html($entry->work_date); ?></h3>
+            <h2>Edycja wpisu z dnia <?php echo esc_html($entry->work_date); ?></h2>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="crm-omd-tracker-form">
                 <?php wp_nonce_field('crm_omd_edit_entry_' . $entry->id); ?>
                 <input type="hidden" name="action" value="crm_omd_edit_entry">
@@ -660,8 +660,8 @@ class CRM_OMD_Time_Manager
                 <p><label>Opis prac<br><textarea name="description" rows="2" required><?php echo esc_textarea($entry->description); ?></textarea></label></p>
                 
                 <p>
-                    <button type="submit">Zapisz zmiany</button>
-                    <a href="<?php echo esc_url(home_url('/panel-pracownika/')); ?>" class="button">Anuluj</a>
+                    <button type="submit" style="float: left;min-width: 45%;margin-right: 10px;text-align: center;margin-top: 5%;">Zapisz zmiany</button>
+                    <a href="<?php echo esc_url(home_url('/panel-pracownika/')); ?>" class="button" style="min-width: 45%;text-align: center;margin-top: 5%;">Anuluj</a>
                 </p>
             </form>
         </div>
@@ -1460,7 +1460,7 @@ class CRM_OMD_Time_Manager
             <p class="submit">
                 <button type="submit" class="button button-primary"><?php echo $entry->id ? 'Zapisz zmiany' : 'Dodaj wpis'; ?></button>
                 <?php if ($entry->id): ?>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=crm-omd-time')); ?>" class="button">Anuluj</a>
+                    <a href="<?php echo esc_url(admin_url('admin.php?page=crm-omd-time')); ?>" class="button" >Anuluj</a>
                 <?php endif; ?>
             </p>
         </form>
