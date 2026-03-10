@@ -2,7 +2,7 @@
 /**
  * Plugin Name: CRM OMD Time Manager
  * Description: Rejestracja czasu pracy pracowników dla klientów i projektów, akceptacja wpisów, raporty miesięczne i eksport CSV.
- * Version: 0.12.2
+ * Version: 0.13.0
  * Author: OMD
  * Text Domain: crm-omd-time-manager
  */
@@ -162,7 +162,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.css', __FILE__),
                 [],
-                '0.12.2'
+                '0.13.0'
             );
             wp_enqueue_style('crm-omd-frontend');
         }
@@ -183,7 +183,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-frontend',
                 plugins_url('assets/frontend.js', __FILE__),
                 ['jquery'],
-                '0.12.2',
+                '0.13.0',
                 true
             );
             wp_localize_script('crm-omd-frontend', 'crm_omd_ajax', [
@@ -203,7 +203,7 @@ class CRM_OMD_Time_Manager
                 'crm-omd-admin',
                 plugins_url('assets/admin.css', __FILE__),
                 [],
-                '0.12.2'
+                '0.13.0'
             );
             wp_enqueue_style('crm-omd-admin');
         }
@@ -234,17 +234,20 @@ class CRM_OMD_Time_Manager
         $this->maybe_add_column($this->tbl_clients, 'postcode', "VARCHAR(10) NULL");
         $this->maybe_add_column($this->tbl_clients, 'city', "VARCHAR(100) NULL");
 
-        // Pozostałe tabele
+        // Tabela projektów z budżetem
         dbDelta("CREATE TABLE {$this->tbl_projects} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             client_id BIGINT UNSIGNED NOT NULL,
             name VARCHAR(191) NOT NULL,
             description TEXT NULL,
+            budget DECIMAL(10,2) NOT NULL DEFAULT 0,
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_at DATETIME NOT NULL,
             PRIMARY KEY  (id),
             KEY client_id (client_id)
         ) $charset;");
+        // Dodanie kolumny budżetu, jeśli nie istnieje (na wypadek aktualizacji)
+        $this->maybe_add_column($this->tbl_projects, 'budget', "DECIMAL(10,2) NOT NULL DEFAULT 0");
 
         dbDelta("CREATE TABLE {$this->tbl_services} (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -688,8 +691,8 @@ class CRM_OMD_Time_Manager
         if (!$project_id && $new_project !== '') {
             $this->wpdb->insert(
                 $this->tbl_projects,
-                ['client_id' => $client_id, 'name' => $new_project, 'description' => '', 'is_active' => 1, 'created_at' => current_time('mysql')],
-                ['%d', '%s', '%s', '%d', '%s']
+                ['client_id' => $client_id, 'name' => $new_project, 'description' => '', 'budget' => 0, 'is_active' => 1, 'created_at' => current_time('mysql')],
+                ['%d', '%s', '%s', '%f', '%d', '%s']
             );
             $project_id = (int) $this->wpdb->insert_id;
         }
@@ -811,10 +814,11 @@ class CRM_OMD_Time_Manager
                     'client_id' => $client_id,
                     'name' => $new_project,
                     'description' => '',
+                    'budget' => 0,
                     'is_active' => 1,
                     'created_at' => current_time('mysql')
                 ],
-                ['%d', '%s', '%s', '%d', '%s']
+                ['%d', '%s', '%s', '%f', '%d', '%s']
             );
             $project_id = (int) $this->wpdb->insert_id;
         }
@@ -1116,6 +1120,7 @@ class CRM_OMD_Time_Manager
 
     /**
      * Pomocnicza funkcja do rysowania formularza wpisu (admin).
+     * Dodano pole "lub dodaj nowy projekt".
      */
     private function render_entry_form($entry, $users, $clients, array $statuses): void
     {
@@ -1154,6 +1159,12 @@ class CRM_OMD_Time_Manager
                     <select name="project_id" id="project_id" required>
                         <option value="">Wybierz projekt</option>
                     </select>
+                </div>
+
+                <!-- NOWE POLE: Dodaj nowy projekt -->
+                <div class="form-field">
+                    <label for="new_project">lub dodaj nowy projekt</label>
+                    <input type="text" name="new_project" id="new_project" maxlength="191" placeholder="Nazwa nowego projektu">
                 </div>
 
                 <div class="form-field">
@@ -1233,14 +1244,36 @@ class CRM_OMD_Time_Manager
         $client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : 0;
         $project_id = isset($_POST['project_id']) ? (int) $_POST['project_id'] : 0;
         $service_id = isset($_POST['service_id']) ? (int) $_POST['service_id'] : 0;
+        $new_project = isset($_POST['new_project']) ? sanitize_text_field(wp_unslash($_POST['new_project'])) : '';
         $work_date = isset($_POST['work_date']) ? sanitize_text_field(wp_unslash($_POST['work_date'])) : '';
         $hours = isset($_POST['hours']) ? (float) $_POST['hours'] : 0;
         $status = isset($_POST['status']) ? sanitize_text_field(wp_unslash($_POST['status'])) : self::STATUS_PENDING;
         $description = isset($_POST['description']) ? sanitize_textarea_field(wp_unslash($_POST['description'])) : '';
 
         $allowed_statuses = array_keys($this->get_available_statuses(true));
-        if (!$user_id || !$client_id || !$project_id || !$service_id || !$work_date || !in_array($status, $allowed_statuses, true)) {
+        if (!$user_id || !$client_id || !$service_id || !$work_date || !in_array($status, $allowed_statuses, true)) {
             wp_die(esc_html__('Niepoprawne dane formularza.', 'crm-omd-time-manager'));
+        }
+
+        // Obsługa nowego projektu
+        if (!$project_id && $new_project !== '') {
+            $this->wpdb->insert(
+                $this->tbl_projects,
+                [
+                    'client_id' => $client_id,
+                    'name' => $new_project,
+                    'description' => '',
+                    'budget' => 0,
+                    'is_active' => 1,
+                    'created_at' => current_time('mysql')
+                ],
+                ['%d', '%s', '%s', '%f', '%d', '%s']
+            );
+            $project_id = (int) $this->wpdb->insert_id;
+        }
+
+        if (!$project_id) {
+            wp_die(esc_html__('Wybierz lub dodaj projekt.', 'crm-omd-time-manager'));
         }
 
         $value = $this->recalculate_entry_value($client_id, $service_id, $hours);
@@ -1563,7 +1596,7 @@ class CRM_OMD_Time_Manager
         $projects_by_client = [];
         foreach ($clients as $client) {
             $projects = $this->wpdb->get_results($this->wpdb->prepare(
-                "SELECT id, name, is_active FROM {$this->tbl_projects} WHERE client_id = %d ORDER BY name ASC",
+                "SELECT id, name, is_active, budget FROM {$this->tbl_projects} WHERE client_id = %d ORDER BY name ASC",
                 $client->id
             ));
             if (!empty($projects)) {
@@ -1605,6 +1638,11 @@ class CRM_OMD_Time_Manager
                     <label for="name">Nazwa projektu *</label>
                     <input type="text" name="name" id="name" value="<?php echo $edit ? esc_attr($edit->name) : ''; ?>" required>
                 </div>
+                <!-- NOWE POLE: Budżet -->
+                <div class="form-field">
+                    <label for="budget">Budżet projektu (PLN)</label>
+                    <input type="number" name="budget" id="budget" step="0.01" min="0" value="<?php echo $edit ? esc_attr((string) $edit->budget) : ''; ?>">
+                </div>
                 <div class="form-field" style="display: flex; align-items: center;background: #d0a46c;border-color: #b58b54;color: #212123;padding: 12px 10px 10px 10px;margin-top: 24px">
                     <label style="margin-right: 10px;">
                         <input type="checkbox" name="is_active" value="1" <?php checked($edit ? (int) $edit->is_active : 1, 1); ?>>
@@ -1627,13 +1665,14 @@ class CRM_OMD_Time_Manager
         echo '<div class="crm-omd-admin-card">';
         echo '<h2>Lista projektów</h2>';
         echo '<table class="widefat striped crm-omd-table">';
-        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Status</th><th>Akcje</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Budżet</th><th>Status</th><th>Akcje</th></tr></thead><tbody>';
         foreach ($projects_by_client as $group) {
-            echo '<tr class="client-group-header"><td colspan="4"><strong>' . esc_html($group['client_name']) . '</strong></td></tr>';
+            echo '<tr class="client-group-header"><td colspan="5"><strong>' . esc_html($group['client_name']) . '</strong></td></tr>';
             foreach ($group['projects'] as $project) {
                 echo '<tr>';
                 echo '<td>' . esc_html($group['client_name']) . '</td>';
                 echo '<td>' . esc_html($project->name) . '</td>';
+                echo '<td>' . esc_html(number_format((float) $project->budget, 2, ',', ' ')) . '</td>';
                 echo '<td>' . ((int) $project->is_active ? 'Aktywny' : 'Nieaktywny') . '</td>';
                 echo '<td>';
                 echo '<a class="button" href="' . esc_url(add_query_arg(['page' => 'crm-omd-projects', 'edit_project' => (int) $project->id], admin_url('admin.php'))) . '">Edytuj</a> ';
@@ -1655,6 +1694,7 @@ class CRM_OMD_Time_Manager
         $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
         $client_id = isset($_POST['client_id']) ? (int) $_POST['client_id'] : 0;
         $name = isset($_POST['name']) ? sanitize_text_field(wp_unslash($_POST['name'])) : '';
+        $budget = isset($_POST['budget']) ? (float) $_POST['budget'] : 0;
         $is_active = isset($_POST['is_active']) ? 1 : 0;
 
         if (!$client_id || $name === '') {
@@ -1662,9 +1702,31 @@ class CRM_OMD_Time_Manager
         }
 
         if ($id > 0) {
-            $this->wpdb->update($this->tbl_projects, ['client_id' => $client_id, 'name' => $name, 'is_active' => $is_active], ['id' => $id], ['%d', '%s', '%d'], ['%d']);
+            $this->wpdb->update(
+                $this->tbl_projects,
+                [
+                    'client_id' => $client_id,
+                    'name'      => $name,
+                    'budget'    => $budget,
+                    'is_active' => $is_active
+                ],
+                ['id' => $id],
+                ['%d', '%s', '%f', '%d'],
+                ['%d']
+            );
         } else {
-            $this->wpdb->insert($this->tbl_projects, ['client_id' => $client_id, 'name' => $name, 'description' => '', 'is_active' => 1, 'created_at' => current_time('mysql')], ['%d', '%s', '%s', '%d', '%s']);
+            $this->wpdb->insert(
+                $this->tbl_projects,
+                [
+                    'client_id'   => $client_id,
+                    'name'        => $name,
+                    'budget'      => $budget,
+                    'description' => '',
+                    'is_active'   => 1,
+                    'created_at'  => current_time('mysql')
+                ],
+                ['%d', '%s', '%f', '%s', '%d', '%s']
+            );
         }
 
         wp_safe_redirect(admin_url('admin.php?page=crm-omd-projects'));
@@ -2021,7 +2083,7 @@ class CRM_OMD_Time_Manager
         <?php
         echo '</div>';
 
-        // Karta podsumowania
+        // Karta podsumowania z kosztem i zyskiem
         echo '<div class="crm-omd-admin-card">';
         echo '<h2>Podsumowanie pracowników</h2>';
         ?>
@@ -2044,7 +2106,8 @@ class CRM_OMD_Time_Manager
                     <th>Różnica godzin</th>
                     <th>Wypracowany zysk (PLN)</th>
                     <th>Pensja (PLN)</th>
-                    <th>Stopa zwrotu</th>
+                    <th>Koszt (PLN)</th>
+                    <th>Zysk netto (PLN)</th>
                 </tr>
             </thead>
             <tbody>
@@ -2052,7 +2115,9 @@ class CRM_OMD_Time_Manager
                     $reported = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_hours : 0;
                     $revenue  = isset($summary[$user->ID]) ? (float) $summary[$user->ID]->total_revenue : 0;
                     $salary = (float) get_user_meta($user->ID, 'crm_omd_worker_monthly_salary', true);
-                    $return = $revenue - $salary;
+                    $hourly_rate = (float) get_user_meta($user->ID, 'crm_omd_worker_hourly_rate', true);
+                    $cost = $reported * $hourly_rate; // uproszczenie – tylko godziny
+                    $profit_net = $revenue - $cost;
                 ?>
                 <tr>
                     <td><?php echo esc_html($user->display_name); ?></td>
@@ -2061,7 +2126,8 @@ class CRM_OMD_Time_Manager
                     <td><?php echo esc_html(number_format($reported - $admin_expected_hours, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($revenue, 2, ',', ' ')); ?></td>
                     <td><?php echo esc_html(number_format($salary, 2, ',', ' ')); ?></td>
-                    <td><?php echo esc_html(number_format($return, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($cost, 2, ',', ' ')); ?></td>
+                    <td><?php echo esc_html(number_format($profit_net, 2, ',', ' ')); ?></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -2236,7 +2302,8 @@ class CRM_OMD_Time_Manager
         }
 
         if ($detail) {
-            $sql = "SELECT e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
+            // Dodajemy e.user_id, aby móc pobrać stawkę pracownika
+            $sql = "SELECT e.user_id, e.work_date, c.name AS client_name, p.name AS project_name, s.name AS service_name, u.display_name, e.hours, e.calculated_value, e.description
                     FROM {$this->tbl_entries} e
                     INNER JOIN {$this->tbl_clients} c ON c.id = e.client_id
                     INNER JOIN {$this->tbl_projects} p ON p.id = e.project_id
@@ -2245,6 +2312,13 @@ class CRM_OMD_Time_Manager
                     {$where}
                     ORDER BY {$sql_order_by} {$sql_order_dir}, e.id ASC";
             $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$params));
+
+            // Pobranie stawek godzinowych dla wszystkich występujących użytkowników
+            $user_ids = array_unique(array_column($rows, 'user_id'));
+            $hourly_rates = [];
+            foreach ($user_ids as $uid) {
+                $hourly_rates[$uid] = (float) get_user_meta($uid, 'crm_omd_worker_hourly_rate', true);
+            }
         } else {
             $sql = "SELECT c.name AS client_name, SUM(e.hours) AS hours_sum, SUM(e.calculated_value) AS value_sum
                     FROM {$this->tbl_entries} e
@@ -2314,21 +2388,31 @@ class CRM_OMD_Time_Manager
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'service_name', 'order_dir' => ($order_by === 'service_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Usługa</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'display_name', 'order_dir' => ($order_by === 'display_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Pracownik</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'hours', 'order_dir' => ($order_by === 'hours' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Godziny</a></th>';
-            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'calculated_value', 'order_dir' => ($order_by === 'calculated_value' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Kwota</a></th>';
+            echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'calculated_value', 'order_dir' => ($order_by === 'calculated_value' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Przychód</a></th>';
+            echo '<th>Koszt</th><th>Zysk</th>'; // NOWE KOLUMNY
             echo '<th>Opis</th>';
         } else {
             $base_url = remove_query_arg(['order_by', 'order_dir']);
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'client_name', 'order_dir' => ($order_by === 'client_name' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Klient</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'hours_sum', 'order_dir' => ($order_by === 'hours_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Ilość godzin (miesiąc)</a></th>';
             echo '<th><a href="' . esc_url(add_query_arg(['order_by' => 'value_sum', 'order_dir' => ($order_by === 'value_sum' && $order_dir === 'ASC' ? 'DESC' : 'ASC')], $base_url)) . '">Łączna kwota</a></th>';
+            // W widoku zagregowanym na razie nie dodajemy kosztów (można rozwinąć później)
         }
         echo '</tr></thead><tbody>';
 
         $total_hours = 0.0;
         $total_value = 0.0;
+        $total_cost = 0.0;
+        $total_profit = 0.0;
+
         foreach ($rows as $row) {
             echo '<tr>';
             if ($detail) {
+                $hourly_rate = isset($hourly_rates[$row->user_id]) ? $hourly_rates[$row->user_id] : 0;
+                // Uproszczenie: koszt liczony tylko dla wpisów z godzinami > 0 (zakładamy, że to wpisy godzinowe)
+                $cost = ($row->hours > 0) ? $row->hours * $hourly_rate : 0;
+                $profit = $row->calculated_value - $cost;
+
                 echo '<td>' . esc_html($row->work_date) . '</td>';
                 echo '<td>' . esc_html($row->client_name) . '</td>';
                 echo '<td>' . esc_html($row->project_name) . '</td>';
@@ -2336,9 +2420,14 @@ class CRM_OMD_Time_Manager
                 echo '<td>' . esc_html($row->display_name) . '</td>';
                 echo '<td>' . esc_html((string) $row->hours) . '</td>';
                 echo '<td>' . esc_html(number_format((float) $row->calculated_value, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format($cost, 2, ',', ' ')) . '</td>';
+                echo '<td>' . esc_html(number_format($profit, 2, ',', ' ')) . '</td>';
                 echo '<td>' . esc_html($row->description) . '</td>';
+
                 $total_hours += (float) $row->hours;
                 $total_value += (float) $row->calculated_value;
+                $total_cost += $cost;
+                $total_profit += $profit;
             } else {
                 echo '<td>' . esc_html($row->client_name) . '</td>';
                 echo '<td>' . esc_html((string) $row->hours_sum) . '</td>';
@@ -2351,9 +2440,10 @@ class CRM_OMD_Time_Manager
 
         echo '</tbody><tfoot><tr>';
         if ($detail) {
-            echo '<th colspan="5">SUMA</th>';
-            echo '<th>' . esc_html(number_format($total_hours, 2, ',', ' ')) . '</th>';
+            echo '<th colspan="6">SUMA</th>';
             echo '<th>' . esc_html(number_format($total_value, 2, ',', ' ')) . '</th>';
+            echo '<th>' . esc_html(number_format($total_cost, 2, ',', ' ')) . '</th>';
+            echo '<th>' . esc_html(number_format($total_profit, 2, ',', ' ')) . '</th>';
             echo '<th></th>';
         } else {
             echo '<th>SUMA</th>';
