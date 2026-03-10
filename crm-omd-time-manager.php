@@ -197,6 +197,26 @@ class CRM_OMD_Time_Manager
         return array_values(array_unique(array_map('intval', $worker_ids)));
     }
 
+    /**
+     * @return array<int, object{id:int,project_id:int,description:string,cost_value:float,created_by:int|null,created_at:string|null}>
+     */
+    private function get_project_cost_rows(int $project_id): array
+    {
+        if ($project_id <= 0) {
+            return [];
+        }
+
+        $query = $this->wpdb->prepare(
+            "SELECT id, project_id, description, cost_value, created_by, created_at
+             FROM {$this->tbl_project_costs}
+             WHERE project_id = %d
+             ORDER BY created_at DESC, id DESC",
+            $project_id
+        );
+
+        return (array) $this->wpdb->get_results($query);
+    }
+
     private function user_can_manage_project(int $user_id, int $project_id): bool
     {
         if ($project_id <= 0 || !$this->user_can_manage_front_projects($user_id)) {
