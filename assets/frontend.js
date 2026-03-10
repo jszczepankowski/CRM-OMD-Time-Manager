@@ -82,13 +82,18 @@
     }
 
     function initAjaxFormSubmit() {
-        var $form = $('form.crm-omd-tracker-form');
-        if (!$form.length) return;
+        var $forms = $('form.crm-omd-tracker-form').filter(function() {
+            return $(this).find('input[name="action"]').val() === 'crm_omd_submit_entry';
+        });
 
-        $form.on('submit', function(e) {
+        if (!$forms.length) return;
+
+        $forms.on('submit', function(e) {
             e.preventDefault();
 
-            var formData = $(this).serialize();
+            var $form = $(this);
+
+            var formData = $form.serialize();
             formData += '&action=crm_omd_submit_entry_ajax';
             formData += '&nonce=' + crm_omd_ajax.nonce;
 
