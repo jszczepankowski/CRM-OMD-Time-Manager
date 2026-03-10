@@ -459,8 +459,7 @@ textarea::placeholder {
     }
 }
 
-.crm-omd-open-cost-modal,
-.crm-omd-open-status-modal {
+.crm-omd-open-cost-modal {
     min-width: auto !important;
     width: auto;
 }
@@ -506,26 +505,4 @@ textarea::placeholder {
 
 .crm-omd-project-actions--modal {
     grid-template-columns: 1fr;
-}
-
-.crm-omd-project-cost-list {
-    margin-top: 12px;
-}
-
-.crm-omd-project-actions--cost-inline {
-    display: flex;
-    grid-template-columns: unset;
-    gap: 8px;
-    align-items: center;
-}
-
-.crm-omd-project-actions--cost-inline button,
-.crm-omd-project-actions--cost-delete button {
-    min-width: auto;
-    width: auto;
-}
-
-.crm-omd-project-actions--cost-delete {
-    display: inline-block;
-    margin-left: 8px;
 }
