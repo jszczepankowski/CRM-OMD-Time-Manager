@@ -164,41 +164,22 @@
             var $tools = $('.crm-omd-table-tools[data-table-target="' + tableId + '"]');
             var $headers = $table.find('thead th');
             var $tbody = $table.find('tbody');
-            var headerCount = $headers.length;
+            var $rows = $tbody.find('tr');
             var activeSort = { index: -1, dir: 'asc' };
             var filters = {};
-            var rowGroups = [];
-            var currentGroup = null;
 
-            if (!headerCount) {
+            if (!$rows.length || !$headers.length) {
                 return;
             }
 
-            $tbody.find('tr').each(function() {
+            $rows.each(function() {
                 var $row = $(this);
-                var $cells = $row.children('td');
-                var isPrimaryRow = $cells.length === headerCount;
-
-                if (isPrimaryRow) {
-                    var values = [];
-                    $cells.each(function() {
-                        values.push($(this).text().trim());
-                    });
-
-                    currentGroup = {
-                        $primaryRow: $row,
-                        $detailRows: $(),
-                        rowValues: values
-                    };
-                    rowGroups.push(currentGroup);
-                } else if (currentGroup) {
-                    currentGroup.$detailRows = currentGroup.$detailRows.add($row);
-                }
+                var values = [];
+                $row.children('td').each(function() {
+                    values.push($(this).text().trim());
+                });
+                $row.data('rowValues', values);
             });
-
-            if (!rowGroups.length) {
-                return;
-            }
 
             $tools.empty();
 
@@ -238,8 +219,9 @@
 
                 if (filterEnabled) {
                     var options = [];
-                    $.each(rowGroups, function(_, group) {
-                        var value = group.rowValues[index] || '';
+                    $rows.each(function() {
+                        var rowValues = $(this).data('rowValues') || [];
+                        var value = rowValues[index] || '';
                         if (value && $.inArray(value, options) === -1) {
                             options.push(value);
                         }
@@ -277,18 +259,19 @@
             });
 
             function applyFilters() {
-                $.each(rowGroups, function(_, group) {
+                $rows.each(function() {
+                    var $row = $(this);
+                    var rowValues = $row.data('rowValues') || [];
                     var visible = true;
 
                     $.each(filters, function(columnIndex, expectedValue) {
-                        if (expectedValue && group.rowValues[columnIndex] !== expectedValue) {
+                        if (expectedValue && rowValues[columnIndex] !== expectedValue) {
                             visible = false;
                             return false;
                         }
                     });
 
-                    group.$primaryRow.toggle(visible);
-                    group.$detailRows.toggle(visible);
+                    $row.toggle(visible);
                 });
             }
 
@@ -298,10 +281,13 @@
                 }
 
                 var sortType = ($headers.eq(activeSort.index).data('sort-type') || 'text').toString();
+                var rowsArray = $rows.get();
 
-                rowGroups.sort(function(a, b) {
-                    var aVal = (a.rowValues[activeSort.index] || '').toString();
-                    var bVal = (b.rowValues[activeSort.index] || '').toString();
+                rowsArray.sort(function(a, b) {
+                    var aValues = $(a).data('rowValues') || [];
+                    var bValues = $(b).data('rowValues') || [];
+                    var aVal = (aValues[activeSort.index] || '').toString();
+                    var bVal = (bValues[activeSort.index] || '').toString();
                     var comparison = 0;
 
                     if (sortType === 'number') {
@@ -318,12 +304,7 @@
                     return activeSort.dir === 'asc' ? comparison : -comparison;
                 });
 
-                $.each(rowGroups, function(_, group) {
-                    $tbody.append(group.$primaryRow);
-                    if (group.$detailRows.length) {
-                        $tbody.append(group.$detailRows);
-                    }
-                });
+                $tbody.append(rowsArray);
             }
 
             function updateHeaderState() {
