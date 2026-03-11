@@ -5,6 +5,7 @@
         initDependentSelects();
         initAjaxFormSubmit();
         initProjectModals();
+        initTableEnhancements();
     });
 
     function initDependentSelects() {
@@ -146,6 +147,189 @@
         $modal.addClass('is-open').attr('aria-hidden', 'false');
     }
 
+
+
+    function initTableEnhancements() {
+        $('.crm-omd-sort-filter-table').each(function() {
+            var $table = $(this);
+            if ($table.data('enhanced') === 1) {
+                return;
+            }
+
+            var tableId = $table.attr('id');
+            if (!tableId) {
+                return;
+            }
+
+            var $tools = $('.crm-omd-table-tools[data-table-target="' + tableId + '"]');
+            var $headers = $table.find('thead th');
+            var $tbody = $table.find('tbody');
+            var $rows = $tbody.find('tr');
+            var activeSort = { index: -1, dir: 'asc' };
+            var filters = {};
+
+            if (!$rows.length || !$headers.length) {
+                return;
+            }
+
+            $rows.each(function() {
+                var $row = $(this);
+                var values = [];
+                $row.children('td').each(function() {
+                    values.push($(this).text().trim());
+                });
+                $row.data('rowValues', values);
+            });
+
+            $tools.empty();
+
+            $headers.each(function(index) {
+                var $header = $(this);
+                var sortType = ($header.data('sort-type') || 'text').toString();
+                var filterEnabled = $header.data('filter') === true || $header.attr('data-filter') === 'true';
+
+                if (sortType !== 'none') {
+                    var originalLabel = $.trim($header.text());
+                    $header
+                        .addClass('crm-omd-sortable-header')
+                        .attr('role', 'button')
+                        .attr('tabindex', '0')
+                        .attr('data-original-label', originalLabel)
+                        .attr('aria-sort', 'none');
+
+                    $header.on('click keydown', function(e) {
+                        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') {
+                            return;
+                        }
+                        if (e.type === 'keydown') {
+                            e.preventDefault();
+                        }
+
+                        if (activeSort.index === index) {
+                            activeSort.dir = activeSort.dir === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            activeSort.index = index;
+                            activeSort.dir = 'asc';
+                        }
+
+                        sortRows();
+                        updateHeaderState();
+                    });
+                }
+
+                if (filterEnabled) {
+                    var options = [];
+                    $rows.each(function() {
+                        var rowValues = $(this).data('rowValues') || [];
+                        var value = rowValues[index] || '';
+                        if (value && $.inArray(value, options) === -1) {
+                            options.push(value);
+                        }
+                    });
+
+                    options.sort(function(a, b) {
+                        return a.localeCompare(b, 'pl', { sensitivity: 'base' });
+                    });
+
+                    if (options.length) {
+                        var headerLabel = $.trim($header.attr('data-original-label') || $header.text());
+                        var $filterWrap = $('<label>', {
+                            class: 'crm-omd-filter-label',
+                            text: headerLabel + ':'
+                        });
+                        var $select = $('<select>', {
+                            class: 'crm-omd-column-filter',
+                            'data-column-index': index
+                        });
+
+                        $select.append($('<option>', { value: '', text: 'Wszystkie' }));
+                        $.each(options, function(_, optionValue) {
+                            $select.append($('<option>', { value: optionValue, text: optionValue }));
+                        });
+
+                        $select.on('change', function() {
+                            filters[index] = $(this).val() || '';
+                            applyFilters();
+                        });
+
+                        $filterWrap.append($select);
+                        $tools.append($filterWrap);
+                    }
+                }
+            });
+
+            function applyFilters() {
+                $rows.each(function() {
+                    var $row = $(this);
+                    var rowValues = $row.data('rowValues') || [];
+                    var visible = true;
+
+                    $.each(filters, function(columnIndex, expectedValue) {
+                        if (expectedValue && rowValues[columnIndex] !== expectedValue) {
+                            visible = false;
+                            return false;
+                        }
+                    });
+
+                    $row.toggle(visible);
+                });
+            }
+
+            function sortRows() {
+                if (activeSort.index < 0) {
+                    return;
+                }
+
+                var sortType = ($headers.eq(activeSort.index).data('sort-type') || 'text').toString();
+                var rowsArray = $rows.get();
+
+                rowsArray.sort(function(a, b) {
+                    var aValues = $(a).data('rowValues') || [];
+                    var bValues = $(b).data('rowValues') || [];
+                    var aVal = (aValues[activeSort.index] || '').toString();
+                    var bVal = (bValues[activeSort.index] || '').toString();
+                    var comparison = 0;
+
+                    if (sortType === 'number') {
+                        var normalize = function(value) {
+                            return parseFloat(value.replace(/\s/g, '').replace(',', '.')) || 0;
+                        };
+                        comparison = normalize(aVal) - normalize(bVal);
+                    } else if (sortType === 'date') {
+                        comparison = aVal.localeCompare(bVal);
+                    } else {
+                        comparison = aVal.localeCompare(bVal, 'pl', { sensitivity: 'base' });
+                    }
+
+                    return activeSort.dir === 'asc' ? comparison : -comparison;
+                });
+
+                $tbody.append(rowsArray);
+            }
+
+            function updateHeaderState() {
+                $headers.each(function(index) {
+                    var $header = $(this);
+                    var originalLabel = $header.attr('data-original-label');
+                    if (!originalLabel) {
+                        return;
+                    }
+
+                    if (index === activeSort.index) {
+                        var arrow = activeSort.dir === 'asc' ? ' ↑' : ' ↓';
+                        $header.text(originalLabel + arrow);
+                        $header.attr('aria-sort', activeSort.dir === 'asc' ? 'ascending' : 'descending');
+                    } else {
+                        $header.text(originalLabel);
+                        $header.attr('aria-sort', 'none');
+                    }
+                });
+            }
+
+            $table.data('enhanced', 1);
+        });
+    }
+
     function refreshMonthlyTable() {
         var $container = $('#crm-omd-monthly-table-container');
         if (!$container.length) return;
@@ -158,6 +342,7 @@
         }, function(response) {
             if (response.success) {
                 $container.html(response.data);
+                initTableEnhancements();
             } else {
                 console.error(response.data);
             }
