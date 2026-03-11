@@ -350,6 +350,30 @@ body {
     background: rgba(221, 177, 120, 0.05);
 }
 
+
+.crm-omd-table-tools {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 12px 0;
+}
+
+.crm-omd-filter-label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 12px;
+}
+
+.crm-omd-filter-label select {
+    min-width: 160px;
+}
+
+.crm-omd-sortable-header {
+    cursor: pointer;
+    user-select: none;
+}
+
 /* Statusy – kolory (opcjonalnie) */
 .entries-table td:nth-child(6):contains("Oczekuje") {
     color: #e67e22; /* pomarańcz */
