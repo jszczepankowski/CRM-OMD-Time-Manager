@@ -664,8 +664,9 @@ class CRM_OMD_Time_Manager
         $portal_url = home_url('/panel-pracownika/');
 
         ob_start();
-        echo '<table class="entries-table">';
-        echo '<thead><tr><th>Data</th><th>Klient</th><th>Projekt</th><th>Usługa</th><th>Godziny</th><th>Status</th><th>Opis</th><th>Akcje</th></tr></thead><tbody>';
+        echo '<div class="crm-omd-table-tools" data-table-target="crm-omd-timesheet-table"></div>';
+        echo '<table id="crm-omd-timesheet-table" class="entries-table crm-omd-sort-filter-table" data-table-type="timesheet">';
+        echo '<thead><tr><th data-sort-type="date">Data</th><th data-sort-type="text" data-filter="true">Klient</th><th data-sort-type="text" data-filter="true">Projekt</th><th data-sort-type="text" data-filter="true">Usługa</th><th data-sort-type="number">Godziny</th><th data-sort-type="text" data-filter="true">Status</th><th data-sort-type="text">Opis</th><th data-sort-type="none">Akcje</th></tr></thead><tbody>';
         if (empty($rows)) {
             echo '<tr><td colspan="8">Brak wpisów dla tego miesiąca.</td></tr>';
         } else {
@@ -949,8 +950,9 @@ private function get_daily_summary_html(int $user_id, string $month): string {
             echo '<p class="crm-omd-project-alert">Projekt został zaktualizowany.</p>';
         }
 
-        echo '<table class="entries-table">';
-        echo '<thead><tr><th>Klient</th><th>Projekt</th><th>Status</th><th>Budżet</th><th>Zaraportowane godziny</th><th>Koszty projektu</th><th>Wynik</th></tr></thead><tbody>';
+        echo '<div class="crm-omd-table-tools" data-table-target="crm-omd-projects-table"></div>';
+        echo '<table id="crm-omd-projects-table" class="entries-table crm-omd-sort-filter-table" data-table-type="projects">';
+        echo '<thead><tr><th data-sort-type="text" data-filter="true">Klient</th><th data-sort-type="text" data-filter="true">Projekt</th><th data-sort-type="text" data-filter="true">Status</th><th data-sort-type="number">Budżet</th><th data-sort-type="number">Zaraportowane godziny</th><th data-sort-type="number">Koszty projektu</th><th data-sort-type="number">Wynik</th></tr></thead><tbody>';
         if (empty($projects)) {
             echo '<tr><td colspan="7">Brak projektów przypisanych do Twojego konta.</td></tr>';
         } else {
