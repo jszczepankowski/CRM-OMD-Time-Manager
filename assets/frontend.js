@@ -174,6 +174,9 @@
 
             $rows.each(function() {
                 var $row = $(this);
+                if ($row.children('td').length !== $headers.length) {
+                    return;
+                }
                 var values = [];
                 $row.children('td').each(function() {
                     values.push($(this).text().trim());
